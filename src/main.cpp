@@ -37,8 +37,9 @@ static const int PWM_MAX  = (1 << PWM_RES) - 1;
 
 // ---- Control Parameters ----
 static const float WHEELBASE_HALF = WHEELBASE_METERS / 2.0f;  // Corrected geometry
-static const float DEADBAND = 0.12f;        // Larger deadband for better control
-static const float SPEED_SMOOTH = 0.85f;    // Speed smoothing factor
+static const float ROTATION_MULTIPLIER = 2.0f;  // Balanced rotation sensitivity
+static const float DEADBAND = 0.10f;        // Slightly smaller deadband for more responsive control
+static const float SPEED_SMOOTH = 0.80f;    // Less smoothing for more responsive feel
 
 // ---- Globals ----
 PSX psx;
@@ -49,6 +50,12 @@ uint32_t last_controller_read = 0;
 // Motor speed smoothing
 float motor_speeds[4] = {0, 0, 0, 0};
 float target_speeds[4] = {0, 0, 0, 0};
+
+// Motor test mode
+bool test_mode = false;
+int current_test_motor = 0;
+uint32_t test_start_time = 0;
+const int TEST_DURATION = 2000;  // 2 seconds per motor
 
 // ---- Enhanced PWM Setup ----
 void setupPWM() {
@@ -98,6 +105,50 @@ void emergencyStop() {
   }
 }
 
+// ---- Motor Test Function ----
+void runMotorTest() {
+  uint32_t now = millis();
+  
+  if (now - test_start_time > TEST_DURATION) {
+    // Stop current motor
+    driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
+    driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
+    driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
+    driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
+    
+    // Move to next motor
+    current_test_motor++;
+    test_start_time = now;
+    
+    if (current_test_motor >= 4) {
+      test_mode = false;
+      Serial.println("\n=== MOTOR TEST COMPLETE ===");
+      Serial.println("Check which motors moved forward vs backward");
+      Serial.println("Update motor direction corrections in code if needed");
+      return;
+    }
+  }
+  
+  // Test current motor
+  const char* motor_names[] = {"Front Left", "Front Right", "Rear Left", "Rear Right"};
+  const int motor_channels[][2] = {
+    {CH_M1_R, CH_M1_L},  // Front Left
+    {CH_M2_R, CH_M2_L},  // Front Right  
+    {CH_M3_R, CH_M3_L},  // Rear Left
+    {CH_M4_R, CH_M4_L}   // Rear Right
+  };
+  
+  if (now - test_start_time < 1000) {
+    // First second: forward
+    Serial.printf("Testing %s - FORWARD\n", motor_names[current_test_motor]);
+    driveBTS7960(motor_channels[current_test_motor][0], motor_channels[current_test_motor][1], 512, 1);
+  } else {
+    // Second second: backward
+    Serial.printf("Testing %s - BACKWARD\n", motor_names[current_test_motor]);
+    driveBTS7960(motor_channels[current_test_motor][0], motor_channels[current_test_motor][1], 512, -1);
+  }
+}
+
 // ---- Enhanced Stick Mapping with Better Feel ----
 static inline float mapStick(uint8_t rawValue, bool invert = false) {
   // Convert 0-255 to -128 to +127
@@ -127,9 +178,10 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n========================================");
-  Serial.println("Mecanum Robot Controller v2.0");
+  Serial.println("Mecanum Robot Controller v2.1");
   Serial.println("Wheelbase: " + String(WHEELBASE_INCHES) + "\" square");
   Serial.println("Wheel Diameter: " + String(WHEEL_DIAMETER_MM) + "mm");
+  Serial.println("Press START button for motor test mode");
   Serial.println("========================================");
 
   setupPWM();
@@ -189,17 +241,42 @@ void loop() {
     return;
   }
   
+  // ---- Motor Test Mode ----
+  if (js.buttons & PSXBTN_START) {
+    if (!test_mode) {
+      test_mode = true;
+      current_test_motor = 0;
+      test_start_time = millis();
+      Serial.println("\n=== STARTING MOTOR TEST ===");
+      Serial.println("Each motor will run forward for 1 second, then backward for 1 second");
+      Serial.println("Watch which direction each motor spins!");
+      Serial.println("Press START again to exit test mode");
+    } else {
+      test_mode = false;
+      emergencyStop();
+      Serial.println("Motor test cancelled");
+    }
+    delay(200);
+    return;
+  }
+  
+  // Run motor test if active
+  if (test_mode) {
+    runMotorTest();
+    return;
+  }
+  
   // ---- Get Joystick Commands ----
   float vx = mapStick(js.JoyLeftY, true);   // Forward/backward (inverted)
   float vy = mapStick(js.JoyLeftX, false);  // Left/right strafe
   float wz = mapStick(js.JoyRightX, false); // Rotation (right stick X)
   
   // ---- Mecanum Wheel Kinematics ----
-  // Using corrected geometry for 10.75" square wheelbase
-  float front_left  =  vx - vy - WHEELBASE_HALF * wz;
-  float front_right =  vx + vy + WHEELBASE_HALF * wz;
-  float rear_left   =  vx + vy - WHEELBASE_HALF * wz;
-  float rear_right  =  vx - vy + WHEELBASE_HALF * wz;
+  // Using corrected geometry for 10.75" square wheelbase with rotation multiplier
+  float front_left  =  vx - vy - WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
+  float front_right =  vx + vy + WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
+  float rear_left   =  vx + vy - WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
+  float rear_right  =  vx - vy + WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
   
   // ---- Normalize to prevent saturation ----
   float max_speed = fmaxf(fmaxf(fabsf(front_left), fabsf(front_right)), 
@@ -219,8 +296,8 @@ void loop() {
   target_speeds[3] = rear_right  * speed_scale;
   
   // ---- Motor Direction Corrections (adjust as needed) ----
-  // You mentioned M4 was reversed, keeping that fix
-  target_speeds[3] = -target_speeds[3];  // Rear Right reversed
+  // Hardware fix applied - motors are now wired correctly!
+  // No software reversals needed
   
   // ---- Smooth Motor Speed Changes ----
   for (int i = 0; i < 4; i++) {
