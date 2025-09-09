@@ -1,6 +1,11 @@
 #include <Arduino.h>
 #include <PSX.h>
 
+// ---- Robot Physical Parameters ----
+#define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
+#define WHEEL_DIAMETER_MM 80       // Wheel diameter (mm)
+#define WHEELBASE_METERS (WHEELBASE_INCHES * 0.0254f)  // Convert to meters
+
 // ---- PS2 pins (working) ----
 #define PIN_PS2_ATT  5
 #define PIN_PS2_CLK  7
@@ -8,32 +13,48 @@
 #define PIN_PS2_DAT  4
 
 // ---- BTS7960 pins (dual-PWM) ----
-#define M1_RPWM 46
+#define M1_RPWM 46   // Front Left motor
 #define M1_LPWM 1
-#define M2_RPWM 2
+#define M2_RPWM 2    // Front Right motor
 #define M2_LPWM 3
-#define M3_RPWM 36
+#define M3_RPWM 36   // Rear Left motor
 #define M3_LPWM 37
-#define M4_RPWM 45
-#define M4_LPWM 19   // revised, no GPIO16 on Heltec V3
+#define M4_RPWM 45   // Rear Right motor
+#define M4_LPWM 19
 
 // ---- LEDC channels ----
 enum {
-  CH_M1_R, CH_M1_L,
-  CH_M2_R, CH_M2_L,
-  CH_M3_R, CH_M3_L,
-  CH_M4_R, CH_M4_L
+  CH_M1_R, CH_M1_L,  // Front Left
+  CH_M2_R, CH_M2_L,  // Front Right
+  CH_M3_R, CH_M3_L,  // Rear Left
+  CH_M4_R, CH_M4_L   // Rear Right
 };
 
-static const int PWM_FREQ = 20000; // 20 kHz
-static const int PWM_RES  = 10;    // 10-bit (0–1023)
+// ---- PWM Configuration - Optimized for TT Motors ----
+static const int PWM_FREQ = 16000;  // 16 kHz - better for small TT motors
+static const int PWM_RES  = 10;     // 10-bit (0–1023)
+static const int PWM_MAX  = (1 << PWM_RES) - 1;
+
+// ---- Control Parameters ----
+static const float WHEELBASE_HALF = WHEELBASE_METERS / 2.0f;  // Corrected geometry
+static const float DEADBAND = 0.12f;        // Larger deadband for better control
+static const float SPEED_SMOOTH = 0.85f;    // Speed smoothing factor
 
 // ---- Globals ----
 PSX psx;
-PSX::PSXDATA state;
+float speed_scale = 0.70f;  // Start with more conservative speed
+bool controller_connected = false;
+uint32_t last_controller_read = 0;
 
-// ---- Helpers ----
+// Motor speed smoothing
+float motor_speeds[4] = {0, 0, 0, 0};
+float target_speeds[4] = {0, 0, 0, 0};
+
+// ---- Enhanced PWM Setup ----
 void setupPWM() {
+  Serial.println("Setting up PWM channels...");
+  
+  // Setup all PWM channels with optimized settings for TT motors
   ledcSetup(CH_M1_R, PWM_FREQ, PWM_RES); ledcAttachPin(M1_RPWM, CH_M1_R);
   ledcSetup(CH_M1_L, PWM_FREQ, PWM_RES); ledcAttachPin(M1_LPWM, CH_M1_L);
   ledcSetup(CH_M2_R, PWM_FREQ, PWM_RES); ledcAttachPin(M2_RPWM, CH_M2_R);
@@ -42,10 +63,15 @@ void setupPWM() {
   ledcSetup(CH_M3_L, PWM_FREQ, PWM_RES); ledcAttachPin(M3_LPWM, CH_M3_L);
   ledcSetup(CH_M4_R, PWM_FREQ, PWM_RES); ledcAttachPin(M4_RPWM, CH_M4_R);
   ledcSetup(CH_M4_L, PWM_FREQ, PWM_RES); ledcAttachPin(M4_LPWM, CH_M4_L);
+  
+  Serial.println("PWM setup complete");
 }
 
+// ---- Enhanced Motor Driver with Safety ----
 void driveBTS7960(int chR, int chL, int duty, int dir) {
-  // dir=+1 forward, -1 reverse, 0 stop
+  // Clamp duty cycle
+  duty = constrain(duty, 0, PWM_MAX);
+  
   if (dir > 0) {
     ledcWrite(chR, duty);
     ledcWrite(chL, 0);
@@ -58,84 +84,166 @@ void driveBTS7960(int chR, int chL, int duty, int dir) {
   }
 }
 
+// ---- Emergency Stop ----
+void emergencyStop() {
+  driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
+  driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
+  driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
+  driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
+  
+  // Reset motor speeds
+  for (int i = 0; i < 4; i++) {
+    motor_speeds[i] = 0;
+    target_speeds[i] = 0;
+  }
+}
+
+// ---- Enhanced Stick Mapping with Better Feel ----
+static inline float mapStick(uint8_t rawValue, bool invert = false) {
+  // Convert 0-255 to -128 to +127
+  int centered = int(rawValue) - 128;
+  
+  // Normalize to -1.0 to +1.0
+  float normalized = (centered >= 0) ? centered / 127.0f : centered / 128.0f;
+  
+  // Apply inversion if requested
+  if (invert) normalized = -normalized;
+  
+  // Apply deadband
+  if (fabsf(normalized) < DEADBAND) return 0.0f;
+  
+  // Scale remaining range to maintain full -1 to +1 output
+  float sign = (normalized >= 0) ? 1.0f : -1.0f;
+  float scaled = (fabsf(normalized) - DEADBAND) / (1.0f - DEADBAND);
+  
+  // Apply slight exponential curve for finer control near center
+  scaled = scaled * scaled * sign;
+  
+  return constrain(scaled, -1.0f, 1.0f);
+}
+
 // ---- Setup ----
 void setup() {
   Serial.begin(115200);
-  delay(500);
-  Serial.println("\n[Robot] PS2 motor test");
+  delay(1000);
+  Serial.println("\n========================================");
+  Serial.println("Mecanum Robot Controller v2.0");
+  Serial.println("Wheelbase: " + String(WHEELBASE_INCHES) + "\" square");
+  Serial.println("Wheel Diameter: " + String(WHEEL_DIAMETER_MM) + "mm");
+  Serial.println("========================================");
 
   setupPWM();
-
+  
+  // Initialize PS2 controller
+  Serial.println("Initializing PS2 controller...");
   psx.setupPins(PIN_PS2_DAT, PIN_PS2_CMD, PIN_PS2_ATT, PIN_PS2_CLK, 10);
   psx.config(PSXMODE_ANALOG);
+  
+  delay(500);
+  Serial.println("Setup complete. Waiting for controller...");
 }
 
-// ---- tuning ----
-static const int PWM_RES  = 10;      // already used in your setup
-static const float k_geom = 0.27305f; // (L+W)/2 in meters for 10.75" square
-float speed_scale = 0.85f;            // default max
-
-// map PS2 stick (0..255) -> -1..+1 with deadband
-static inline float mapStick(uint8_t v, bool invert=false) {
-  int c = int(v) - 128;
-  float x = (c >= 0) ? c / 127.0f : c / 128.0f;
-  if (invert) x = -x;
-  const float dead = 0.08f;
-  if (fabsf(x) < dead) return 0.0f;
-  float s = (fabsf(x) - dead) / (1.0f - dead);
-  return (x >= 0) ? s : -s;
-}
-
+// ---- Main Control Loop ----
 void loop() {
   PSX::PSXDATA js;
-  if (psx.read(js) != PSXERROR_SUCCESS) {
-    // fail-safe stop if controller not readable
-    driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
-    driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
-    driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
-    driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
+  uint32_t now = millis();
+  
+  // Try to read controller
+  if (psx.read(js) == PSXERROR_SUCCESS) {
+    controller_connected = true;
+    last_controller_read = now;
+  } else {
+    // Controller timeout handling
+    if (now - last_controller_read > 100) {  // 100ms timeout
+      if (controller_connected) {
+        Serial.println("Controller disconnected!");
+        controller_connected = false;
+      }
+      emergencyStop();
+      delay(10);
+      return;
+    }
+  }
+  
+  if (!controller_connected) {
     delay(10);
     return;
   }
-
-  // speed modes
-  if (js.buttons & PSXBTN_L1)      speed_scale = 0.45f;
-  else if (js.buttons & PSXBTN_R1) speed_scale = 1.00f;
-  else                              speed_scale = 0.85f;
-
-  // sticks -> commands
-  float vx = mapStick(js.JoyLeftY,  true);  // up=forward
-  float vy = mapStick(js.JoyLeftX,  false); // right=strafe right
-  float wz = mapStick(js.JoyRightX, false); // right=rotate CW (flip if you prefer)
-
-  // mecanum mix (FL, FR, RL, RR)
-  float FL =  vx - vy - k_geom*wz;
-  float FR =  vx + vy + k_geom*wz;
-  float RL =  vx + vy - k_geom*wz;
-  float RR =  vx - vy + k_geom*wz;
-
-  // normalize to [-1,1]
-  float m = fmaxf(fmaxf(fabsf(FL), fabsf(FR)), fmaxf(fabsf(RL), fabsf(RR)));
-  if (m > 1.0f) { FL/=m; FR/=m; RL/=m; RR/=m; }
-
-  // global scaling
-  FL *= speed_scale; FR *= speed_scale; RL *= speed_scale; RR *= speed_scale;
-
-  // --- software fix for your reversed M4 ---
-  RR = -RR;
-
-  // send to BTS7960 (dual-PWM helper you already have)
-  auto toDuty = [](float v){ return int(fabsf(v) * ((1<<PWM_RES)-1)); };
-  driveBTS7960(CH_M1_R, CH_M1_L, toDuty(FL), (FL>0)-(FL<0));
-  driveBTS7960(CH_M2_R, CH_M2_L, toDuty(FR), (FR>0)-(FR<0));
-  driveBTS7960(CH_M3_R, CH_M3_L, toDuty(RL), (RL>0)-(RL<0));
-  driveBTS7960(CH_M4_R, CH_M4_L, toDuty(RR), (RR>0)-(RR<0));
-
-  // optional: brief status log
-  static uint32_t t=0; if (millis()-t>250) {
-    Serial.printf("vx=%.2f vy=%.2f wz=%.2f  scale=%.2f  RRfix\n",
-                  vx, vy, wz, speed_scale);
-    t = millis();
+  
+  // ---- Speed Mode Control ----
+  if (js.buttons & PSXBTN_L1) {
+    speed_scale = 0.35f;  // Slow mode for precision
+  } else if (js.buttons & PSXBTN_R1) {
+    speed_scale = 1.00f;  // Full speed mode
+  } else if (js.buttons & PSXBTN_L2) {
+    speed_scale = 0.50f;  // Medium-slow mode
+  } else {
+    speed_scale = 0.70f;  // Default mode
   }
-  delay(10);
+  
+  // ---- Emergency Stop ----
+  if (js.buttons & PSXBTN_SELECT) {
+    emergencyStop();
+    Serial.println("EMERGENCY STOP!");
+    delay(100);
+    return;
+  }
+  
+  // ---- Get Joystick Commands ----
+  float vx = mapStick(js.JoyLeftY, true);   // Forward/backward (inverted)
+  float vy = mapStick(js.JoyLeftX, false);  // Left/right strafe
+  float wz = mapStick(js.JoyRightX, false); // Rotation (right stick X)
+  
+  // ---- Mecanum Wheel Kinematics ----
+  // Using corrected geometry for 10.75" square wheelbase
+  float front_left  =  vx - vy - WHEELBASE_HALF * wz;
+  float front_right =  vx + vy + WHEELBASE_HALF * wz;
+  float rear_left   =  vx + vy - WHEELBASE_HALF * wz;
+  float rear_right  =  vx - vy + WHEELBASE_HALF * wz;
+  
+  // ---- Normalize to prevent saturation ----
+  float max_speed = fmaxf(fmaxf(fabsf(front_left), fabsf(front_right)), 
+                         fmaxf(fabsf(rear_left), fabsf(rear_right)));
+  
+  if (max_speed > 1.0f) {
+    front_left  /= max_speed;
+    front_right /= max_speed;
+    rear_left   /= max_speed;
+    rear_right  /= max_speed;
+  }
+  
+  // ---- Apply Speed Scaling ----
+  target_speeds[0] = front_left  * speed_scale;
+  target_speeds[1] = front_right * speed_scale;
+  target_speeds[2] = rear_left   * speed_scale;
+  target_speeds[3] = rear_right  * speed_scale;
+  
+  // ---- Motor Direction Corrections (adjust as needed) ----
+  // You mentioned M4 was reversed, keeping that fix
+  target_speeds[3] = -target_speeds[3];  // Rear Right reversed
+  
+  // ---- Smooth Motor Speed Changes ----
+  for (int i = 0; i < 4; i++) {
+    motor_speeds[i] = motor_speeds[i] * SPEED_SMOOTH + target_speeds[i] * (1.0f - SPEED_SMOOTH);
+  }
+  
+  // ---- Drive Motors ----
+  auto toDuty = [](float speed) { return int(fabsf(speed) * PWM_MAX); };
+  auto getDirection = [](float speed) { return (speed > 0) ? 1 : (speed < 0) ? -1 : 0; };
+  
+  driveBTS7960(CH_M1_R, CH_M1_L, toDuty(motor_speeds[0]), getDirection(motor_speeds[0]));
+  driveBTS7960(CH_M2_R, CH_M2_L, toDuty(motor_speeds[1]), getDirection(motor_speeds[1]));
+  driveBTS7960(CH_M3_R, CH_M3_L, toDuty(motor_speeds[2]), getDirection(motor_speeds[2]));
+  driveBTS7960(CH_M4_R, CH_M4_L, toDuty(motor_speeds[3]), getDirection(motor_speeds[3]));
+  
+  // ---- Status Reporting ----
+  static uint32_t last_status = 0;
+  if (now - last_status > 500) {  // Every 500ms
+    Serial.printf("vx=%.2f vy=%.2f wz=%.2f | speed=%.2f | FL=%.2f FR=%.2f RL=%.2f RR=%.2f\n",
+                  vx, vy, wz, speed_scale, 
+                  motor_speeds[0], motor_speeds[1], motor_speeds[2], motor_speeds[3]);
+    last_status = now;
+  }
+  
+  delay(10);  // 100Hz control loop
 }
