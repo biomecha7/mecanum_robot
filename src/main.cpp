@@ -1,71 +1,108 @@
 #include <Arduino.h>
-#include <PSX.h>   // using your vendored lib in lib/ArduinoPSX/src
+#include <PSX.h>
 
-// Heltec WiFi LoRa 32 V3 safe pins (avoid LoRa/OLED/USB)
-#define PIN_PS2_ATT  5   // ATT / Select (yellow)
-#define PIN_PS2_CLK  7   // CLK (blue)
-#define PIN_PS2_CMD  6   // CMD (orange)  ESP -> Pad
-#define PIN_PS2_DAT  4   // DAT (brown)   Pad -> ESP
+// ---- PS2 pins (working) ----
+#define PIN_PS2_ATT  5
+#define PIN_PS2_CLK  7
+#define PIN_PS2_CMD  6
+#define PIN_PS2_DAT  4
 
-PSX psx;                 // default constructor
-PSX::PSXDATA state;      // holds buttons + sticks
+// ---- BTS7960 pins (dual-PWM) ----
+#define M1_RPWM 46
+#define M1_LPWM 1
+#define M2_RPWM 2
+#define M2_LPWM 3
+#define M3_RPWM 36
+#define M3_LPWM 37
+#define M4_RPWM 45
+#define M4_LPWM 19   // revised, no GPIO16 on Heltec V3
 
+// ---- LEDC channels ----
+enum {
+  CH_M1_R, CH_M1_L,
+  CH_M2_R, CH_M2_L,
+  CH_M3_R, CH_M3_L,
+  CH_M4_R, CH_M4_L
+};
+
+static const int PWM_FREQ = 20000; // 20 kHz
+static const int PWM_RES  = 10;    // 10-bit (0–1023)
+
+// ---- Globals ----
+PSX psx;
+PSX::PSXDATA state;
+
+// ---- Helpers ----
+void setupPWM() {
+  ledcSetup(CH_M1_R, PWM_FREQ, PWM_RES); ledcAttachPin(M1_RPWM, CH_M1_R);
+  ledcSetup(CH_M1_L, PWM_FREQ, PWM_RES); ledcAttachPin(M1_LPWM, CH_M1_L);
+  ledcSetup(CH_M2_R, PWM_FREQ, PWM_RES); ledcAttachPin(M2_RPWM, CH_M2_R);
+  ledcSetup(CH_M2_L, PWM_FREQ, PWM_RES); ledcAttachPin(M2_LPWM, CH_M2_L);
+  ledcSetup(CH_M3_R, PWM_FREQ, PWM_RES); ledcAttachPin(M3_RPWM, CH_M3_R);
+  ledcSetup(CH_M3_L, PWM_FREQ, PWM_RES); ledcAttachPin(M3_LPWM, CH_M3_L);
+  ledcSetup(CH_M4_R, PWM_FREQ, PWM_RES); ledcAttachPin(M4_RPWM, CH_M4_R);
+  ledcSetup(CH_M4_L, PWM_FREQ, PWM_RES); ledcAttachPin(M4_LPWM, CH_M4_L);
+}
+
+void driveBTS7960(int chR, int chL, int duty, int dir) {
+  // dir=+1 forward, -1 reverse, 0 stop
+  if (dir > 0) {
+    ledcWrite(chR, duty);
+    ledcWrite(chL, 0);
+  } else if (dir < 0) {
+    ledcWrite(chR, 0);
+    ledcWrite(chL, duty);
+  } else {
+    ledcWrite(chR, 0);
+    ledcWrite(chL, 0);
+  }
+}
+
+// ---- Setup ----
 void setup() {
   Serial.begin(115200);
   delay(500);
-  Serial.println("\n[PS2] init (ArduinoPSX v1.0.1)…");
+  Serial.println("\n[Robot] PS2 motor test");
 
-  // NOTE: setupPins order in your lib is (data, cmd, att, clock, delay_us)
+  setupPWM();
+
   psx.setupPins(PIN_PS2_DAT, PIN_PS2_CMD, PIN_PS2_ATT, PIN_PS2_CLK, 10);
-
-  // Put controller into analog mode (also disables vibration per your lib)
   psx.config(PSXMODE_ANALOG);
-
-  Serial.println("[PS2] Config requested: ANALOG mode");
 }
 
-static void printButtons(uint16_t b) {
-  // In this library, bits are set when a button is PRESSED (see PSX.cpp)
-  if (b & PSXBTN_START)    Serial.println("START");
-  if (b & PSXBTN_SELECT)   Serial.println("SELECT");
-
-  if (b & PSXBTN_UP)       Serial.println("DPAD_UP");
-  if (b & PSXBTN_RIGHT)    Serial.println("DPAD_RIGHT");
-  if (b & PSXBTN_DOWN)     Serial.println("DPAD_DOWN");
-  if (b & PSXBTN_LEFT)     Serial.println("DPAD_LEFT");
-
-  if (b & PSXBTN_TRIANGLE) Serial.println("TRIANGLE");
-  if (b & PSXBTN_CIRCLE)   Serial.println("CIRCLE");
-  if (b & PSXBTN_CROSS)    Serial.println("CROSS");
-  if (b & PSXBTN_SQUARE)   Serial.println("SQUARE");
-
-  if (b & PSXBTN_L1) Serial.println("L1");
-  if (b & PSXBTN_R1) Serial.println("R1");
-  if (b & PSXBTN_L2) Serial.println("L2");
-  if (b & PSXBTN_R2) Serial.println("R2");
-}
-
+// ---- Loop ----
 void loop() {
-  // Read the controller into `state`
   int err = psx.read(state);
-  if (err == PSXERROR_SUCCESS) {
-    printButtons(state.buttons);
-
-    static uint32_t tLog = 0;
-    if (millis() - tLog > 200) {
-      // Sticks are 0..255, ~128 centered
-      Serial.printf("LX=%3u  LY=%3u  RX=%3u  RY=%3u\n",
-        state.JoyLeftX, state.JoyLeftY, state.JoyRightX, state.JoyRightY);
-      tLog = millis();
-    }
-  } else {
-    // No data (PSXERROR_NODATA): brief pause to avoid spam
-    static uint32_t tErr = 0;
-    if (millis() - tErr > 1000) {
-      Serial.println("[PS2] No data (check wiring/power).");
+  if (err != PSXERROR_SUCCESS) {
+    static uint32_t tErr=0; if (millis()-tErr > 1000) {
+      Serial.println("[PS2] No data…");
       tErr = millis();
     }
+    delay(10);
+    return;
   }
 
-  delay(10);
+  const int duty = 700; // ~70% of 10-bit max = ~1023
+  int dirM1=0, dirM2=0, dirM3=0, dirM4=0;
+
+  // --- Map buttons to motor directions ---
+  if (state.buttons & PSXBTN_UP)    dirM1 = +1;
+  if (state.buttons & PSXBTN_DOWN)  dirM1 = -1;
+
+  if (state.buttons & PSXBTN_RIGHT) dirM2 = +1;
+  if (state.buttons & PSXBTN_LEFT)  dirM2 = -1;
+
+  if (state.buttons & PSXBTN_TRIANGLE) dirM3 = +1;
+  if (state.buttons & PSXBTN_CROSS)    dirM3 = -1;
+
+  if (state.buttons & PSXBTN_SQUARE) dirM4 = +1;
+  if (state.buttons & PSXBTN_CIRCLE) dirM4 = -1;
+
+  // --- Drive motors ---
+  driveBTS7960(CH_M1_R, CH_M1_L, duty, dirM1);
+  driveBTS7960(CH_M2_R, CH_M2_L, duty, dirM2);
+  driveBTS7960(CH_M3_R, CH_M3_L, duty, dirM3);
+  driveBTS7960(CH_M4_R, CH_M4_L, duty, dirM4);
+
+  delay(20);
 }
