@@ -70,39 +70,72 @@ void setup() {
   psx.config(PSXMODE_ANALOG);
 }
 
-// ---- Loop ----
+// ---- tuning ----
+static const int PWM_RES  = 10;      // already used in your setup
+static const float k_geom = 0.27305f; // (L+W)/2 in meters for 10.75" square
+float speed_scale = 0.85f;            // default max
+
+// map PS2 stick (0..255) -> -1..+1 with deadband
+static inline float mapStick(uint8_t v, bool invert=false) {
+  int c = int(v) - 128;
+  float x = (c >= 0) ? c / 127.0f : c / 128.0f;
+  if (invert) x = -x;
+  const float dead = 0.08f;
+  if (fabsf(x) < dead) return 0.0f;
+  float s = (fabsf(x) - dead) / (1.0f - dead);
+  return (x >= 0) ? s : -s;
+}
+
 void loop() {
-  int err = psx.read(state);
-  if (err != PSXERROR_SUCCESS) {
-    static uint32_t tErr=0; if (millis()-tErr > 1000) {
-      Serial.println("[PS2] No data…");
-      tErr = millis();
-    }
+  PSX::PSXDATA js;
+  if (psx.read(js) != PSXERROR_SUCCESS) {
+    // fail-safe stop if controller not readable
+    driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
+    driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
+    driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
+    driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
     delay(10);
     return;
   }
 
-  const int duty = 700; // ~70% of 10-bit max = ~1023
-  int dirM1=0, dirM2=0, dirM3=0, dirM4=0;
+  // speed modes
+  if (js.buttons & PSXBTN_L1)      speed_scale = 0.45f;
+  else if (js.buttons & PSXBTN_R1) speed_scale = 1.00f;
+  else                              speed_scale = 0.85f;
 
-  // --- Map buttons to motor directions ---
-  if (state.buttons & PSXBTN_UP)    dirM1 = +1;
-  if (state.buttons & PSXBTN_DOWN)  dirM1 = -1;
+  // sticks -> commands
+  float vx = mapStick(js.JoyLeftY,  true);  // up=forward
+  float vy = mapStick(js.JoyLeftX,  false); // right=strafe right
+  float wz = mapStick(js.JoyRightX, false); // right=rotate CW (flip if you prefer)
 
-  if (state.buttons & PSXBTN_RIGHT) dirM2 = +1;
-  if (state.buttons & PSXBTN_LEFT)  dirM2 = -1;
+  // mecanum mix (FL, FR, RL, RR)
+  float FL =  vx - vy - k_geom*wz;
+  float FR =  vx + vy + k_geom*wz;
+  float RL =  vx + vy - k_geom*wz;
+  float RR =  vx - vy + k_geom*wz;
 
-  if (state.buttons & PSXBTN_TRIANGLE) dirM3 = +1;
-  if (state.buttons & PSXBTN_CROSS)    dirM3 = -1;
+  // normalize to [-1,1]
+  float m = fmaxf(fmaxf(fabsf(FL), fabsf(FR)), fmaxf(fabsf(RL), fabsf(RR)));
+  if (m > 1.0f) { FL/=m; FR/=m; RL/=m; RR/=m; }
 
-  if (state.buttons & PSXBTN_SQUARE) dirM4 = +1;
-  if (state.buttons & PSXBTN_CIRCLE) dirM4 = -1;
+  // global scaling
+  FL *= speed_scale; FR *= speed_scale; RL *= speed_scale; RR *= speed_scale;
 
-  // --- Drive motors ---
-  driveBTS7960(CH_M1_R, CH_M1_L, duty, dirM1);
-  driveBTS7960(CH_M2_R, CH_M2_L, duty, dirM2);
-  driveBTS7960(CH_M3_R, CH_M3_L, duty, dirM3);
-  driveBTS7960(CH_M4_R, CH_M4_L, duty, dirM4);
+  // --- software fix for your reversed M4 ---
+  RR = -RR;
 
-  delay(20);
+  // send to BTS7960 (dual-PWM helper you already have)
+  auto toDuty = [](float v){ return int(fabsf(v) * ((1<<PWM_RES)-1)); };
+  driveBTS7960(CH_M1_R, CH_M1_L, toDuty(FL), (FL>0)-(FL<0));
+  driveBTS7960(CH_M2_R, CH_M2_L, toDuty(FR), (FR>0)-(FR<0));
+  driveBTS7960(CH_M3_R, CH_M3_L, toDuty(RL), (RL>0)-(RL<0));
+  driveBTS7960(CH_M4_R, CH_M4_L, toDuty(RR), (RR>0)-(RR<0));
+
+  // optional: brief status log
+  static uint32_t t=0; if (millis()-t>250) {
+    Serial.printf("vx=%.2f vy=%.2f wz=%.2f  scale=%.2f  RRfix\n",
+                  vx, vy, wz, speed_scale);
+    t = millis();
+  }
+  delay(10);
 }
