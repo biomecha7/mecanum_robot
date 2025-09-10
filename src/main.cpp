@@ -60,7 +60,7 @@ static const float SPEED_SMOOTH = 0.80f;
 // ---- Test Configuration ----
 #define MOTOR_TEST_POWER 512      // 50% power for testing
 #define MOTOR_TEST_DURATION 2000  // 2 seconds per direction
-#define SENSOR_READ_INTERVAL 500  // 500ms between sensor reads
+#define SENSOR_READ_INTERVAL 200  // 200ms between sensor reads
 
 // ---- Globals ----
 PSX psx;
@@ -102,6 +102,7 @@ bool test_running = false;
 uint32_t test_start_time = 0;
 int current_motor = 0;
 int current_direction = 1; // 1 = forward, -1 = backward
+uint32_t last_button_press = 0;
 
 // ---- Encoder Interrupt Handlers ----
 void IRAM_ATTR enc1_isr() {
@@ -140,10 +141,19 @@ void IRAM_ATTR enc4_isr() {
 bool initIMU() {
   Serial.println("🔧 Initializing IMU...");
   
-  // Initialize ICM-20948
-  if (myICM.begin() == ICM_20948_Stat_Ok) {
+  // Initialize ICM-20948 - try both addresses
+  if (myICM.begin(Wire, 0) == ICM_20948_Stat_Ok) {
     Serial.println("✅ ICM-20948 initialized successfully!");
-    Serial.println("   I2C Address: 0x69 (default)");
+    Serial.println("   I2C Address: 0x68 (detected)");
+    
+    // Initialize IMU data
+    imu_data.data_ready = false;
+    imu_data.last_read = 0;
+    
+    return true;
+  } else if (myICM.begin(Wire, 1) == ICM_20948_Stat_Ok) {
+    Serial.println("✅ ICM-20948 initialized successfully!");
+    Serial.println("   I2C Address: 0x69 (detected)");
     
     // Initialize IMU data
     imu_data.data_ready = false;
@@ -153,6 +163,7 @@ bool initIMU() {
   } else {
     Serial.println("❌ ICM-20948 initialization failed!");
     Serial.println("   Check wiring: SDA=GPIO38, SCL=GPIO39");
+    Serial.println("   Tried addresses: 0x68 and 0x69");
     return false;
   }
 }
@@ -360,7 +371,7 @@ void runIMUTest() {
                     imu_data.mag_x, imu_data.mag_y, imu_data.mag_z,
                     imu_data.temperature);
     } else {
-      Serial.println("⚠️  IMU: No data available");
+      Serial.println("⚠️  IMU: No data available - check wiring");
     }
     last_print = now;
   }
@@ -468,7 +479,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n========================================");
-  Serial.println("🤖 Mecanum Robot Controller v4.0 - TEST SUITE");
+  Serial.println("🤖 Mecanum Robot Controller v4.2 - SENSOR TEST");
   Serial.println("Wheelbase: " + String(WHEELBASE_INCHES) + "\" square");
   Serial.println("Wheel Diameter: " + String(WHEEL_DIAMETER_MM) + "mm");
   Serial.println("========================================");
@@ -498,7 +509,7 @@ void setup() {
   
   delay(500);
   Serial.println("✅ Setup complete. Ready for testing!");
-  Serial.println("💡 Press L1 to start motor test, or other buttons for sensor tests");
+  Serial.println("💡 Press START to scan I2C, L2 for IMU data, R1 for encoders");
 }
 
 // ---- Main Control Loop ----
@@ -527,47 +538,52 @@ void loop() {
       current_motor = 0;
       current_direction = 1;
       test_start_time = now;
-      Serial.println("\n�� Starting MOTOR TEST sequence...");
+      Serial.println("\n🚀 Starting MOTOR TEST sequence...");
       Serial.println("   Each motor will run FORWARD then BACKWARD for 2 seconds each");
-      delay(200);
+      last_button_press = now;
     } else if (js.buttons & PSXBTN_L2) {
       current_test = TEST_IMU;
       test_running = true;
       Serial.println("\n🚀 Starting IMU TEST...");
-      delay(200);
+      Serial.println("   Press any button to stop");
+      last_button_press = now;
     } else if (js.buttons & PSXBTN_R1) {
       current_test = TEST_ENCODERS;
       test_running = true;
       Serial.println("\n🚀 Starting ENCODER TEST...");
-      delay(200);
+      Serial.println("   Press any button to stop");
+      last_button_press = now;
     } else if (js.buttons & PSXBTN_R2) {
       current_test = TEST_PS2;
       test_running = true;
       Serial.println("\n🚀 Starting PS2 TEST...");
-      delay(200);
+      Serial.println("   Press any button to stop");
+      last_button_press = now;
     } else if (js.buttons & PSXBTN_START) {
       current_test = TEST_I2C;
       test_running = true;
       Serial.println("\n🚀 Starting I2C SCANNER TEST...");
-      delay(200);
+      Serial.println("   Press any button to stop");
+      last_button_press = now;
     } else if (js.buttons & PSXBTN_SELECT) {
       current_test = TEST_ALL_SENSORS;
       test_running = true;
       Serial.println("\n🚀 Starting ALL SENSORS TEST...");
-      delay(200);
+      Serial.println("   Press any button to stop");
+      last_button_press = now;
     } else if (js.buttons & PSXBTN_CROSS) {
       emergencyStop();
-      delay(200);
+      last_button_press = now;
     }
   }
   
-  // Stop test if any button pressed (except during motor test)
+  // Stop test if any button pressed (except during motor test) - with debounce
   if (controller_connected && test_running && current_test != TEST_MOTORS) {
-    if (js.buttons != 0) {
+    if (js.buttons != 0 && (now - last_button_press > 500)) { // 500ms debounce
       test_running = false;
       current_test = TEST_IDLE;
       Serial.println("⏹️  Test stopped by user");
-      delay(200);
+      last_button_press = now;
     }
   }
   
