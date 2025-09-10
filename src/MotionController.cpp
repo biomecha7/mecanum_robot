@@ -3,9 +3,19 @@
 #include <math.h>
 
 // Constants for calculations
+// --- Robot physical params (meters) ---
+static constexpr float WHEEL_DIAMETER_M = 0.080f;                 // 80 mm
+static constexpr float WHEEL_RADIUS_M   = WHEEL_DIAMETER_M * 0.5f;
 
+// From MotionController.h: 10.75" square → wheelbase = track
+static constexpr float WHEELBASE_M = WHEELBASE_METERS;            // from header
+static constexpr float TRACK_M     = WHEELBASE_METERS;            // assume square
+static constexpr float L_EFFECT    = 0.5f*WHEELBASE_M + 0.5f*TRACK_M;
 
-
+// Map stick [-1,1] to body-frame speeds (start conservative)
+static constexpr float MAX_VX_MPS  = 0.40f;
+static constexpr float MAX_VY_MPS  = 0.40f;
+static constexpr float MAX_WZ_RAD  = 1.50f;
 
 MotionController::MotionController() 
     : m_frontLeft(nullptr), m_frontRight(nullptr), m_rearLeft(nullptr), m_rearRight(nullptr),
@@ -123,29 +133,21 @@ void MotionController::drive(float forward, float strafe, float rotate) {
 
 void MotionController::driveWithHeading(float forward, float strafe, float target_heading) {
     m_targetHeading = target_heading;
-    
+
     if (_control_mode == ControlMode::ORIENTATION_PID) {
-        // Calculate base velocities
-        float base_velocities[4];
-        _mecanumKinematics(forward, strafe, 0, base_velocities);
-        
-        // Apply orientation correction
+        // Compute heading error to [-pi, pi]
         float heading_error = target_heading - _state.heading;
-        // Normalize angle to [-PI, PI]
-        while (heading_error > PI) heading_error -= 2*PI;
+        while (heading_error > PI)  heading_error -= 2*PI;
         while (heading_error < -PI) heading_error += 2*PI;
-        
-        float orientation_correction = m_orientationPID->compute(0, heading_error, millis());
-        
-        // Add orientation correction to wheel velocities
-        for (int i = 0; i < 4; i++) {
-            m_targetVelocities[i] = base_velocities[i] + orientation_correction;
-        }
-        
-        _applyVelocityControl();
+
+        // Let orientation PID produce a wz_correction
+        float wz_correction = m_orientationPID->compute(0.0f, heading_error, millis());
+
+        // Feed orientation as wz through kinematics so wheel signs are correct
+        _mecanumKinematics(forward, strafe, wz_correction, m_targetVelocities);
+        _applyVelocityControl();   // per-wheel velocity PIDs in m/s → duty
     } else {
-        // Fall back to regular drive
-        drive(forward, strafe, 0);
+        drive(forward, strafe, 0.0f);
     }
 }
 
@@ -300,17 +302,18 @@ float MotionController::_calculateWheelVelocity(int32_t encoder_delta, uint32_t 
     return velocity_mm_per_s / 1000.0f; // Convert to m/s
 }
 
-void MotionController::_mecanumKinematics(float vx, float vy, float wz, float* wheel_vels) {
-    // Mecanum wheel kinematics
-    wheel_vels[0] = vx + vy + wz;  // Front Left
-    wheel_vels[1] = vx - vy - wz;  // Front Right
-    wheel_vels[2] = vx - vy + wz;  // Rear Left
-    wheel_vels[3] = vx + vy - wz;  // Rear Right
-    
-    // Clamp to [-1, 1]
-    for (int i = 0; i < 4; i++) {
-        wheel_vels[i] = std::max(-1.0f, std::min(1.0f, wheel_vels[i]));
-    }
+void MotionController::_mecanumKinematics(float forward_cmd, float strafe_cmd, float rotate_cmd, float* wheel_vels) {
+    // Map joystick [-1,1] to physical body velocities
+    const float vx = forward_cmd * MAX_VX_MPS;   // m/s
+    const float vy = strafe_cmd  * MAX_VY_MPS;   // m/s
+    const float wz = rotate_cmd  * MAX_WZ_RAD;   // rad/s
+
+    // Per-wheel **linear** speeds [m/s], using standard mecanum signs
+    wheel_vels[0] = vx + vy + L_EFFECT * wz;  // FL
+    wheel_vels[1] = vx - vy - L_EFFECT * wz;  // FR
+    wheel_vels[2] = vx - vy + L_EFFECT * wz;  // RL
+    wheel_vels[3] = vx + vy - L_EFFECT * wz;  // RR
+    // NOTE: no clamping here; clamp at final duty (MotorDriver::set)
 }
 
 void MotionController::_mecanumInverseKinematics(float fl, float fr, float rl, float rr, float* vx, float* vy, float* wz) {
