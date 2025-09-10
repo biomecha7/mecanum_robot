@@ -29,6 +29,27 @@ void MotorDriver::stop() {
     ledcWrite(_chL, 0);
 }
 
+/**
+ * @brief Set the motor speed in range [-1, 1]. Positive is forward, negative is reverse.
+ * @param speed Motor speed, normalized [-1, 1]
+ */
+void MotorDriver::setSpeed(float speed) {
+    set(speed);
+}
+
+/**
+ * @brief Internal function to set motor speed and direction.
+ * @param speed Motor speed, normalized [-1, 1]
+ */
+void MotorDriver::set(float speed) {
+    // Clamp speed to [-1, 1]
+    if (speed > 1.0f) speed = 1.0f;
+    if (speed < -1.0f) speed = -1.0f;
+    int duty = (int)(_maxDuty * fabs(speed));
+    int dir = (speed >= 0) ? 1 : -1;
+    drive(duty, dir);
+}
+
 void MotorDriver::setMaxDuty(int maxDuty) {
     _maxDuty = maxDuty;
 }
