@@ -3,6 +3,8 @@
 #include <Wire.h>
 #include <ICM_20948.h>
 #include "EncoderDriverSimple.h"
+#include "MotorDriver.h"
+#include "MotionController.h"
 
 // ---- Robot Physical Parameters ----
 #define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
@@ -70,6 +72,15 @@ EncoderDriverSimple encoder1(ENC_M1_A, ENC_M1_B, &encoder_counts[0]);
 EncoderDriverSimple encoder2(ENC_M2_A, ENC_M2_B, &encoder_counts[1]);
 EncoderDriverSimple encoder3(ENC_M3_A, ENC_M3_B, &encoder_counts[2]);
 EncoderDriverSimple encoder4(ENC_M4_A, ENC_M4_B, &encoder_counts[3]);
+
+// Motor driver objects
+MotorDriver motorFL(CH_M1_R, CH_M1_L, M1_RPWM, M1_LPWM, PWM_FREQ, PWM_RES);
+MotorDriver motorFR(CH_M2_R, CH_M2_L, M2_RPWM, M2_LPWM, PWM_FREQ, PWM_RES);
+MotorDriver motorRL(CH_M3_R, CH_M3_L, M3_RPWM, M3_LPWM, PWM_FREQ, PWM_RES);
+MotorDriver motorRR(CH_M4_R, CH_M4_L, M4_RPWM, M4_LPWM, PWM_FREQ, PWM_RES);
+
+// Motion controller
+MotionController motionController(&motorFL, &motorFR, &motorRL, &motorRR);
 
 // IMU
 ICM_20948_I2C myICM;
@@ -148,16 +159,10 @@ void driveBTS7960(int chR, int chL, int duty, int dir) {
 
 // ---- Emergency Stop ----
 void emergencyStop() {
-  driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
-  driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
-  driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
-  driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
-  
-  // Reset motor speeds
-  for (int i = 0; i < 4; i++) {
-    motor_speeds[i] = 0;
-    target_speeds[i] = 0;
-  }
+  motorFL.stop();
+  motorFR.stop();
+  motorRL.stop();
+  motorRR.stop();
 }
 
 // ---- Enhanced Stick Mapping with Better Feel ----
@@ -263,73 +268,33 @@ void loop() {
   }
   
   // ---- Drive Mode ----
-  if (js.buttons & PSXBTN_CROSS) {
-    // Speed Mode Control
-    if (js.buttons & PSXBTN_L1) {
-      speed_scale = 0.35f;  // Slow mode for precision
-    } else if (js.buttons & PSXBTN_R1) {
-      speed_scale = 1.00f;  // Full speed mode
-    } else if (js.buttons & PSXBTN_L2) {
-      speed_scale = 0.50f;  // Medium-slow mode
-    } else {
-      speed_scale = 0.70f;  // Default mode
-    }
-    
-    // ---- Get Joystick Commands ----
-    float vx = mapStick(js.JoyLeftY, true);   // Forward/backward (inverted)
-    float vy = mapStick(js.JoyRightX, false); // Left/right strafe (swapped)
-    float wz = mapStick(js.JoyLeftX, false);  // Rotation (swapped)
-    
-    // ---- Mecanum Wheel Kinematics ----
-    // Using corrected geometry for 10.75" square wheelbase with rotation multiplier
-    float front_left  =  vx - vy - WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
-    float front_right =  vx + vy + WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
-    float rear_left   =  vx + vy - WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
-    float rear_right  =  vx - vy + WHEELBASE_HALF * wz * ROTATION_MULTIPLIER;
-    
-    // ---- Normalize to prevent saturation ----
-    float max_speed = fmaxf(fmaxf(fabsf(front_left), fabsf(front_right)), 
-                           fmaxf(fabsf(rear_left), fabsf(rear_right)));
-    
-    if (max_speed > 1.0f) {
-      front_left  /= max_speed;
-      front_right /= max_speed;
-      rear_left   /= max_speed;
-      rear_right  /= max_speed;
-    }
-    
-    // ---- Apply Speed Scaling ----
-    target_speeds[0] = front_left  * speed_scale;
-    target_speeds[1] = front_right * speed_scale;
-    target_speeds[2] = rear_left   * speed_scale;
-    target_speeds[3] = rear_right  * speed_scale;
-    
-    // ---- Smooth Motor Speed Changes ----
-    for (int i = 0; i < 4; i++) {
-      motor_speeds[i] = motor_speeds[i] * SPEED_SMOOTH + target_speeds[i] * (1.0f - SPEED_SMOOTH);
-    }
-    
-    // ---- Drive Motors ----
-    auto toDuty = [](float speed) { return int(fabsf(speed) * PWM_MAX); };
-    auto getDirection = [](float speed) { return (speed > 0) ? 1 : (speed < 0) ? -1 : 0; };
-    
-    driveBTS7960(CH_M1_R, CH_M1_L, toDuty(motor_speeds[0]), getDirection(motor_speeds[0]));
-    driveBTS7960(CH_M2_R, CH_M2_L, toDuty(motor_speeds[1]), getDirection(motor_speeds[1]));
-    driveBTS7960(CH_M3_R, CH_M3_L, toDuty(motor_speeds[2]), getDirection(motor_speeds[2]));
-    driveBTS7960(CH_M4_R, CH_M4_L, toDuty(motor_speeds[3]), getDirection(motor_speeds[3]));
-    
-    // ---- Status Reporting ----
-    static uint32_t last_status = 0;
-    if (now - last_status > 500) {  // Every 500ms
-      Serial.printf("vx=%.2f vy=%.2f wz=%.2f | speed=%.2f | FL=%.2f FR=%.2f RL=%.2f RR=%.2f\n",
-                    vx, vy, wz, speed_scale, 
-                    motor_speeds[0], motor_speeds[1], motor_speeds[2], motor_speeds[3]);
-      last_status = now;
-    }
+  // Speed Mode Control
+  if (js.buttons & PSXBTN_L1) {
+    speed_scale = 0.35f;  // Slow mode for precision
+  } else if (js.buttons & PSXBTN_R1) {
+    speed_scale = 1.00f;  // Full speed mode
+  } else if (js.buttons & PSXBTN_L2) {
+    speed_scale = 0.50f;  // Medium-slow mode
   } else {
-    // Stop motors when X button not pressed
-    emergencyStop();
+    speed_scale = 0.70f;  // Default mode
   }
+  
+  // ---- Get Joystick Commands ----
+  float vx = mapStick(js.JoyLeftY, true);   // Forward/backward (inverted)
+  float vy = mapStick(js.JoyRightX, false); // Left/right strafe (swapped)
+  float wz = mapStick(js.JoyLeftX, false);  // Rotation (swapped)
+
+  // ---- Drive using MotionController ----
+  motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
+
+  // ---- Status Reporting ----
+  static uint32_t last_status = 0;
+  if (now - last_status > 500) {  // Every 500ms
+    Serial.printf("vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
+                  vx, vy, wz, speed_scale);
+    last_status = now;
+  }
+
   
   delay(10);  // 100Hz control loop
 }
