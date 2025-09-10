@@ -42,13 +42,22 @@ void MotorDriver::setSpeed(float speed) {
  * @param speed Motor speed, normalized [-1, 1]
  */
 void MotorDriver::set(float speed) {
-    // Clamp speed to [-1, 1]
+    // Clamp to [-1, 1]
     if (speed > 1.0f) speed = 1.0f;
     if (speed < -1.0f) speed = -1.0f;
+
+    // Per-motor slew limit
+    const float maxStep = 0.05f;  // ≈5% per call at ~100 Hz
+    float delta = speed - _lastSpeed;
+    if (delta >  maxStep) speed = _lastSpeed + maxStep;
+    if (delta < -maxStep) speed = _lastSpeed - maxStep;
+    _lastSpeed = speed;
+
     int duty = (int)(_maxDuty * fabs(speed));
-    int dir = (speed >= 0) ? 1 : -1;
+    int dir  = (speed >= 0) ? 1 : -1;
     drive(duty, dir);
 }
+
 
 void MotorDriver::setMaxDuty(int maxDuty) {
     _maxDuty = maxDuty;

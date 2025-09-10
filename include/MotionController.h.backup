@@ -11,4 +11,5 @@ private:
     MotorDriver* m_frontRight;
     MotorDriver* m_rearLeft;
     MotorDriver* m_rearRight;
+    float m_wheelVelFilt[4] = {0,0,0,0};
 };

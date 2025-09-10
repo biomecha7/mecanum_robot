@@ -34,6 +34,11 @@ MotionController::MotionController()
     _state = {};
     _state.last_update_ms = 0;
     _state.last_encoder_read_ms = 0;
+
+    for (int i = 0; i < 4; ++i) {
+        m_wheelVelFilt[i] = 0.0f;
+    }
+
 }
 
 MotionController::~MotionController() {
@@ -204,13 +209,10 @@ void MotionController::setOrientationPIDGains(float kp, float ki, float kd) {
 
 void MotionController::resetPIDControllers() {
     for (int i = 0; i < 4; i++) {
-        if (m_velocityPID[i]) {
-            m_velocityPID[i]->reset();
-        }
+        if (m_velocityPID[i]) m_velocityPID[i]->reset();
+        m_wheelVelFilt[i] = 0.0f;
     }
-    if (m_orientationPID) {
-        m_orientationPID->reset();
-    }
+    if (m_orientationPID) m_orientationPID->reset();
 }
 
 void MotionController::_updateWheelVelocities() {
@@ -221,6 +223,8 @@ void MotionController::_updateWheelVelocities() {
         for (int i = 0; i < 4; i++) {
             int32_t encoder_delta = m_encoderCounts[i] - m_lastEncoderCounts[i];
             _state.wheel_velocities[i] = _calculateWheelVelocity(encoder_delta, time_delta);
+            const float alpha = 0.25f; // 0..1  (0.2-0.4 works well)
+            m_wheelVelFilt[i] = alpha * _state.wheel_velocities[i] + (1.0f - alpha) * m_wheelVelFilt[i];
             m_lastEncoderCounts[i] = m_encoderCounts[i];
         }
         _state.last_encoder_read_ms = current_time;
@@ -267,14 +271,26 @@ void MotionController::_applyVelocityControl() {
     
     for (int i = 0; i < 4; i++) {
         if (m_velocityPID[i]) {
-            float pid_output = m_velocityPID[i]->compute(m_targetVelocities[i], _state.wheel_velocities[i], current_time);
+            const float kS = 0.03f;   // static bump (duty fraction)
+            const float kV = 0.50f;   // duty per (m/s) — tune later
+
+            float v_set = m_targetVelocities[i];   // m/s
+            float v_meas = m_wheelVelFilt[i];      // m/s
+
+            float u_pid = m_velocityPID[i]->compute(v_set, v_meas, current_time);
+            float u_ff  = (v_set != 0.0f ? kS * (v_set > 0 ? 1.0f : -1.0f) : 0.0f) + kV * v_set;
+            float u = u_ff + u_pid;
+
+            // clamp and send
+            if (u > 1.0f) u = 1.0f;
+            if (u < -1.0f) u = -1.0f;
             
             // Apply PID output to motor
             switch (i) {
-                case 0: m_frontLeft->setSpeed(pid_output); break;
-                case 1: m_frontRight->setSpeed(pid_output); break;
-                case 2: m_rearLeft->setSpeed(pid_output); break;
-                case 3: m_rearRight->setSpeed(pid_output); break;
+                case 0: m_frontLeft->setSpeed(u); break;
+                case 1: m_frontRight->setSpeed(u); break;
+                case 2: m_rearLeft->setSpeed(u); break;
+                case 3: m_rearRight->setSpeed(u); break;
             }
         }
     }
@@ -319,7 +335,7 @@ void MotionController::_mecanumKinematics(float forward_cmd, float strafe_cmd, f
 void MotionController::_mecanumInverseKinematics(float fl, float fr, float rl, float rr, float* vx, float* vy, float* wz) {
     *vx = (fl + fr + rl + rr) / 4.0f;
     *vy = (fl - fr - rl + rr) / 4.0f;
-    *wz = (fl - fr + rl - rr) / 4.0f;
+    *wz = (fl - fr + rl - rr) / (4.0f * L_EFFECT);
 }
 
 void MotionController::printDebugInfo() {

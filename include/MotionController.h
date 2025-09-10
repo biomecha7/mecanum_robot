@@ -6,7 +6,6 @@
 #include "RobotPins.h"
 
 
-
 // ---- Robot Physical Parameters ----
 #define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
 #define WHEEL_DIAMETER_MM 80.0f    // Wheel diameter (mm)
@@ -100,6 +99,9 @@ private:
     EncoderDriver* m_encoderRL;
     EncoderDriver* m_encoderRR;
     IMUDriver* m_imu;
+    
+    // Filtered wheel velocity (EMA) used by the velocity PID
+    float m_wheelVelFilt[4];
     
     // PID controllers
     PIDController* m_velocityPID[4];  // One for each wheel

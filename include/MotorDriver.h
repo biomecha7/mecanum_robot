@@ -17,6 +17,7 @@ public:
         int _chR, _chL;
         int _pwmPinR, _pwmPinL;
         int _freq, _res, _maxDuty;
+        float _lastSpeed = 0.0f;   // per-motor slew memory
     /**
      * @brief Internal function to set motor speed and direction.
      * @param speed Motor speed, normalized [-1, 1]

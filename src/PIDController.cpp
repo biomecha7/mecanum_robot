@@ -1,14 +1,14 @@
 #include "PIDController.h"
 
 // Constants for different control modes
-const float WHEEL_VELOCITY_KP = 2.0f;
-const float WHEEL_VELOCITY_KI = 0.5f;
-const float WHEEL_VELOCITY_KD = 0.1f;
+const float WHEEL_VELOCITY_KP = 0.8f;
+const float WHEEL_VELOCITY_KI = 0.10f;
+const float WHEEL_VELOCITY_KD = 0.0f;
 const float WHEEL_VELOCITY_MAX_OUTPUT = 1.0f;
 const float WHEEL_VELOCITY_MIN_OUTPUT = -1.0f;
 const float WHEEL_VELOCITY_INTEGRAL_LIMIT = 2.0f;
-const float WHEEL_VELOCITY_DEADBAND = 0.01f;
-const uint32_t WHEEL_VELOCITY_SAMPLE_TIME_MS = 10;
+const uint32_t WHEEL_VELOCITY_SAMPLE_TIME_MS = 20;  // from 10 → 20 ms
+const float WHEEL_VELOCITY_DEADBAND = 0.02f;        // ignore tiny errors in m/s
 
 const float ORIENTATION_KP = 1.5f;
 const float ORIENTATION_KI = 0.2f;
@@ -45,42 +45,43 @@ float PIDController::compute(float setpoint, float current_value, uint32_t curre
     
     // Calculate error
     float error = setpoint - current_value;
-    
+
     // Apply deadband
-    if (abs(error) < _config.deadband) {
-        error = 0.0f;
-    }
-    
-    // Calculate proportional term
-    float proportional = _config.kp * error;
-    
-    // Calculate integral term
+    if (abs(error) < _config.deadband) error = 0.0f;
+
     float dt = (_last_time_ms > 0) ? (current_time_ms - _last_time_ms) / 1000.0f : 0.0f;
+
+    // Proportional
+    float proportional = _config.kp * error;
+
+    // Derivative (on error is fine here)
+    if (dt > 0) _derivative = (error - _last_error) / dt;
+    else        _derivative = 0.0f;
+    float derivative_term = _config.kd * _derivative;
+
+    // ---- Anti-windup guarded integral (update ONCE) ----
     if (dt > 0) {
+    // predict output without the new integral to test saturation direction
+    float tentative_output_noI = proportional + _config.kd * _derivative;
+    // if we are saturating and error pushes further into saturation, skip integrating
+    bool pushing_into_sat_hi = (tentative_output_noI >= _config.max_output && error > 0);
+    bool pushing_into_sat_lo = (tentative_output_noI <= _config.min_output && error < 0);
+    if (!(pushing_into_sat_hi || pushing_into_sat_lo)) {
         _integral += error * dt;
         _clampIntegral();
     }
-    float integral_term = _config.ki * _integral;
-    
-    // Calculate derivative term
-    if (dt > 0) {
-        _derivative = (error - _last_error) / dt;
-    } else {
-        _derivative = 0.0f;
     }
-    float derivative_term = _config.kd * _derivative;
-    
-    // Calculate output
+    float integral_term = _config.ki * _integral;
+
+    // Output + clamp
     float output = proportional + integral_term + derivative_term;
-    
-    // Apply output limits
     _applyOutputLimits(output);
-    
-    // Update state
+
+    // Bookkeeping
     _last_error = error;
     _last_output = output;
     _last_time_ms = current_time_ms;
-    
+
     return output;
 }
 
