@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <PSX.h>
 #include <Wire.h>
-#include <ICM_20948.h>
 #include "MotorDriver.h"
 #include "MotionController.h"
 #include "RobotPins.h"
@@ -45,8 +44,6 @@ MotorDriver motorRR(CH_M4_R, CH_M4_L, M4_RPWM, M4_LPWM, PWM_FREQ, PWM_RES);
 // Motion controller
 MotionController motionController(&motorFL, &motorFR, &motorRL, &motorRR);
 
-// IMU
-ICM_20948_I2C myICM;
 bool controller_connected = false;
 uint32_t last_controller_read = 0;
 
@@ -69,25 +66,6 @@ void setupPWM() {
   ledcSetup(CH_M4_L, PWM_FREQ, PWM_RES); ledcAttachPin(M4_LPWM, CH_M4_L);
   
   Serial.println("PWM setup complete");
-}
-
-void setupI2C() {
-  Serial.println("🔧 Setting up I2C...");
-  Wire.begin(IMU_SDA, IMU_SCL);
-  Wire.setClock(400000);
-  Serial.println("✅ I2C setup complete");
-}
-
-void initIMU() {
-  Serial.println("🔧 Initializing IMU...");
-  if (myICM.begin(Wire, 0) == ICM_20948_Stat_Ok) {
-    Serial.println("✅ IMU initialized at address 0x68");
-  } else if (myICM.begin(Wire, 1) == ICM_20948_Stat_Ok) {
-    Serial.println("✅ IMU initialized at address 0x69");
-  } else {
-    Serial.println("❌ IMU initialization failed");
-  }
-  Serial.println("✅ IMU setup complete");
 }
 
 // ---- Enhanced Motor Driver with Safety ----
@@ -153,8 +131,6 @@ void setup() {
   Serial.println("========================================");
 
   setupPWM();
-  setupI2C();
-  initIMU();
   
   // Initialize PS2 controller
   Serial.println("Initializing PS2 controller...");
@@ -228,6 +204,5 @@ void loop() {
     last_status = now;
   }
 
-  
   delay(10);  // 100Hz control loop
 }
