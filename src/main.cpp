@@ -159,10 +159,7 @@ void driveBTS7960(int chR, int chL, int duty, int dir) {
 
 // ---- Emergency Stop ----
 void emergencyStop() {
-  motorFL.stop();
-  motorFR.stop();
-  motorRL.stop();
-  motorRR.stop();
+  motionController.stop();
 }
 
 // ---- Enhanced Stick Mapping with Better Feel ----

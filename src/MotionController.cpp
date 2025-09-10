@@ -22,3 +22,10 @@ void MotionController::drive(float forward, float strafe, float rotate) {
     m_rearLeft->setSpeed(rl);
     m_rearRight->setSpeed(rr);
 }
+
+void MotionController::stop() {
+    m_frontLeft->stop();
+    m_frontRight->stop();
+    m_rearLeft->stop();
+    m_rearRight->stop();
+}

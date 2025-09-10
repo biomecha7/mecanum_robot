@@ -5,6 +5,7 @@ class MotionController {
 public:
     MotionController(MotorDriver* frontLeft, MotorDriver* frontRight, MotorDriver* rearLeft, MotorDriver* rearRight);
     void drive(float forward, float strafe, float rotate);
+    void stop();
 private:
     MotorDriver* m_frontLeft;
     MotorDriver* m_frontRight;
