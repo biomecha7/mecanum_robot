@@ -1,46 +1,15 @@
 #include <Arduino.h>
-#include <PSX.h>
 #include <Wire.h>
 #include "MotionController.h"
-#include "RobotPins.h"
+#include "PS2Controller.h"
 
 // ---- Globals ----
-PSX psx;
-float speed_scale = 0.70f;  // Start with more conservative speed
-
-// Motion controller
 MotionController motionController;
-
-bool controller_connected = false;
-uint32_t last_controller_read = 0;
+PS2Controller ps2Controller;
 
 // ---- Emergency Stop ----
 void emergencyStop() {
   motionController.stop();
-}
-
-// ---- Enhanced Stick Mapping with Better Feel ----
-static inline float mapStick(uint8_t rawValue, bool invert = false) {
-  // Convert 0-255 to -128 to +127
-  int centered = int(rawValue) - 128;
-  
-  // Normalize to -1.0 to +1.0
-  float normalized = (centered >= 0) ? centered / 127.0f : centered / 128.0f;
-  
-  // Apply inversion if requested
-  if (invert) normalized = -normalized;
-  
-  // Apply deadband (get from MotionController)
-  if (fabsf(normalized) < motionController.getDeadband()) return 0.0f;
-  
-  // Scale remaining range to maintain full -1 to +1 output
-  float sign = (normalized >= 0) ? 1.0f : -1.0f;
-  float scaled = (fabsf(normalized) - motionController.getDeadband()) / (1.0f - motionController.getDeadband());
-  
-  // Apply slight exponential curve for finer control near center
-  scaled = scaled * scaled * sign;
-  
-  return constrain(scaled, -1.0f, 1.0f);
 }
 
 // ---- Setup ----
@@ -64,71 +33,47 @@ void setup() {
   motionController.initialize();
   
   // Initialize PS2 controller
-  Serial.println("Initializing PS2 controller...");
-  psx.setupPins(PIN_PS2_DAT, PIN_PS2_CMD, PIN_PS2_ATT, PIN_PS2_CLK, 10);
-  psx.config(PSXMODE_ANALOG);
+  ps2Controller.initialize();
   
-  delay(500);
+  // Set deadband for joystick mapping
+  ps2Controller.setDeadband(motionController.getDeadband());
+  
   Serial.println("Setup complete. Ready to drive!");
 }
 
 // ---- Main Control Loop ----
 void loop() {
-  PSX::PSXDATA js;
-  uint32_t now = millis();
-  
-  // Try to read controller
-  if (psx.read(js) == PSXERROR_SUCCESS) {
-    controller_connected = true;
-    last_controller_read = now;
-  } else {
-    // Controller timeout handling
-    if (now - last_controller_read > 100) {  // 100ms timeout
-      if (controller_connected) {
-        Serial.println("Controller disconnected!");
-        controller_connected = false;
-      }
+  // Update controller and check if we have valid data
+  if (!ps2Controller.update()) {
+    // Controller not connected or emergency stop
+    if (ps2Controller.isEmergencyStop()) {
       emergencyStop();
-      delay(10);
+      delay(100);
       return;
     }
-  }
-  
-  if (!controller_connected) {
     delay(10);
     return;
   }
   
-  // ---- Emergency Stop ----
-  if (js.buttons & PSXBTN_SELECT) {
+  // Check for emergency stop
+  if (ps2Controller.isEmergencyStop()) {
     emergencyStop();
-    Serial.println("🛑 EMERGENCY STOP!");
     delay(100);
     return;
   }
   
-  // ---- Drive Mode ----
-  // Speed Mode Control
-  if (js.buttons & PSXBTN_L1) {
-    speed_scale = 0.35f;  // Slow mode for precision
-  } else if (js.buttons & PSXBTN_R1) {
-    speed_scale = 1.00f;  // Full speed mode
-  } else if (js.buttons & PSXBTN_L2) {
-    speed_scale = 0.50f;  // Medium-slow mode
-  } else {
-    speed_scale = 0.70f;  // Default mode
-  }
-  
-  // ---- Get Joystick Commands ----
-  float vx = mapStick(js.JoyLeftY, true);   // Forward/backward (inverted)
-  float vy = mapStick(js.JoyRightX, false); // Left/right strafe (swapped)
-  float wz = mapStick(js.JoyLeftX, false);  // Rotation (swapped)
+  // Get control values from controller
+  float vx = ps2Controller.getVx();
+  float vy = ps2Controller.getVy();
+  float wz = ps2Controller.getWz();
+  float speed_scale = ps2Controller.getSpeedScale();
 
-  // ---- Drive using MotionController ----
+  // Drive using MotionController
   motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
 
   // ---- Status Reporting ----
   static uint32_t last_status = 0;
+  uint32_t now = millis();
   if (now - last_status > 500) {  // Every 500ms
     Serial.printf("vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
                   vx, vy, wz, speed_scale);
