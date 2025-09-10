@@ -47,7 +47,7 @@ void MotorDriver::set(float speed) {
     if (speed < -1.0f) speed = -1.0f;
 
     // Per-motor slew limit
-    const float maxStep = 0.05f;  // ≈5% per call at ~100 Hz
+    const float maxStep = 0.10f;  // ≈5% per call at ~100 Hz
     float delta = speed - _lastSpeed;
     if (delta >  maxStep) speed = _lastSpeed + maxStep;
     if (delta < -maxStep) speed = _lastSpeed - maxStep;

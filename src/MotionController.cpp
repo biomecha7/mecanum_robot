@@ -13,9 +13,11 @@ static constexpr float TRACK_M     = WHEELBASE_METERS;            // assume squa
 static constexpr float L_EFFECT    = 0.5f*WHEELBASE_M + 0.5f*TRACK_M;
 
 // Map stick [-1,1] to body-frame speeds (start conservative)
-static constexpr float MAX_VX_MPS  = 0.40f;
-static constexpr float MAX_VY_MPS  = 0.40f;
-static constexpr float MAX_WZ_RAD  = 1.50f;
+// conservative → sporty
+static constexpr float MAX_VX_MPS  = 0.80f;   // was 0.40
+static constexpr float MAX_VY_MPS  = 0.80f;   // was 0.40
+static constexpr float MAX_WZ_RAD  = 2.50f;   // was 1.50
+
 
 MotionController::MotionController() 
     : m_frontLeft(nullptr), m_frontRight(nullptr), m_rearLeft(nullptr), m_rearRight(nullptr),
@@ -272,7 +274,7 @@ void MotionController::_applyVelocityControl() {
     for (int i = 0; i < 4; i++) {
         if (m_velocityPID[i]) {
             const float kS = 0.03f;   // static bump (duty fraction)
-            const float kV = 0.50f;   // duty per (m/s) — tune later
+            const float kV = 0.90f;   // duty per (m/s) — tune later
 
             float v_set = m_targetVelocities[i];   // m/s
             float v_meas = m_wheelVelFilt[i];      // m/s
