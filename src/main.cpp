@@ -4,17 +4,6 @@
 #include "MotionController.h"
 #include "RobotPins.h"
 
-// ---- Robot Physical Parameters ----
-#define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
-#define WHEEL_DIAMETER_MM 80       // Wheel diameter (mm)
-#define WHEELBASE_METERS (WHEELBASE_INCHES * 0.0254f)  // Convert to meters
-
-// ---- Control Parameters ----
-static const float WHEELBASE_HALF = WHEELBASE_METERS / 2.0f;  // Corrected geometry
-static const float ROTATION_MULTIPLIER = 4.5f;  // Increased rotation sensitivity
-static const float DEADBAND = 0.10f;        // Slightly smaller deadband for more responsive control
-static const float SPEED_SMOOTH = 0.80f;    // Less smoothing for more responsive feel
-
 // ---- Globals ----
 PSX psx;
 float speed_scale = 0.70f;  // Start with more conservative speed
@@ -41,12 +30,12 @@ static inline float mapStick(uint8_t rawValue, bool invert = false) {
   // Apply inversion if requested
   if (invert) normalized = -normalized;
   
-  // Apply deadband
-  if (fabsf(normalized) < DEADBAND) return 0.0f;
+  // Apply deadband (get from MotionController)
+  if (fabsf(normalized) < motionController.getDeadband()) return 0.0f;
   
   // Scale remaining range to maintain full -1 to +1 output
   float sign = (normalized >= 0) ? 1.0f : -1.0f;
-  float scaled = (fabsf(normalized) - DEADBAND) / (1.0f - DEADBAND);
+  float scaled = (fabsf(normalized) - motionController.getDeadband()) / (1.0f - motionController.getDeadband());
   
   // Apply slight exponential curve for finer control near center
   scaled = scaled * scaled * sign;
@@ -60,8 +49,8 @@ void setup() {
   delay(1000);
   Serial.println("\n========================================");
   Serial.println("🤖 Mecanum Robot Controller - DRIVE MODE");
-  Serial.println("Wheelbase: " + String(WHEELBASE_INCHES) + "\" square");
-  Serial.println("Wheel Diameter: " + String(WHEEL_DIAMETER_MM) + "mm");
+  Serial.println("Wheelbase: " + String(motionController.getWheelbaseInches()) + "\" square");
+  Serial.println("Wheel Diameter: " + String(motionController.getWheelDiameterMm()) + "mm");
   Serial.println("========================================");
   Serial.println("🎮 CONTROLS:");
   Serial.println("  L1: Slow mode (35%)");
