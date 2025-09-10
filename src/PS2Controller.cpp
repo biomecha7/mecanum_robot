@@ -4,7 +4,7 @@
 PS2Controller::PS2Controller() 
     : m_controller_connected(false), m_last_controller_read(0),
       m_vx(0.0f), m_vy(0.0f), m_wz(0.0f), m_speed_scale(SPEED_DEFAULT),
-      m_emergency_stop(false), m_deadband(0.10f) {}
+      m_emergency_stop(false), m_last_buttons(0), m_previous_buttons(0), m_deadband(0.10f) {}
 
 void PS2Controller::initialize() {
     Serial.println("Initializing PS2 controller...");
@@ -22,6 +22,10 @@ bool PS2Controller::update() {
     if (m_psx.read(js) == PSXERROR_SUCCESS) {
         m_controller_connected = true;
         m_last_controller_read = now;
+        
+        // Store previous button state
+        m_previous_buttons = m_last_buttons;
+        m_last_buttons = js.buttons;
         
         // Process controller inputs
         processButtons(js);
@@ -41,6 +45,14 @@ bool PS2Controller::update() {
     }
     
     return false;
+}
+
+bool PS2Controller::getButtonPressed(uint16_t button) const {
+    return (m_last_buttons & button) && !(m_previous_buttons & button);
+}
+
+bool PS2Controller::getButtonReleased(uint16_t button) const {
+    return !(m_last_buttons & button) && (m_previous_buttons & button);
 }
 
 void PS2Controller::processButtons(const PSX::PSXDATA& js) {

@@ -33,6 +33,11 @@ public:
     // Set deadband (needed for joystick mapping)
     void setDeadband(float deadband) { m_deadband = deadband; }
     
+    // Button access methods
+    bool getButton(uint16_t button) const { return (m_last_buttons & button) != 0; }
+    bool getButtonPressed(uint16_t button) const;
+    bool getButtonReleased(uint16_t button) const;
+    
 private:
     // PS2 controller instance
     PSX m_psx;
@@ -45,6 +50,10 @@ private:
     float m_vx, m_vy, m_wz;
     float m_speed_scale;
     bool m_emergency_stop;
+    
+    // Button state tracking
+    uint16_t m_last_buttons;
+    uint16_t m_previous_buttons;
     
     // Joystick mapping parameters
     float m_deadband;

@@ -7,6 +7,12 @@
 MotionController motionController;
 PS2Controller ps2Controller;
 
+// ---- Control State ----
+bool closedLoopEnabled = false;
+bool debugMode = false;
+uint32_t lastDebugPrint = 0;
+uint32_t lastSensorUpdate = 0;
+
 // ---- Emergency Stop ----
 void emergencyStop() {
   motionController.stop();
@@ -17,7 +23,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n========================================");
-  Serial.println("🤖 Mecanum Robot Controller - DRIVE MODE");
+  Serial.println("🤖 Mecanum Robot Controller - ENHANCED");
   Serial.println("Wheelbase: " + String(motionController.getWheelbaseInches()) + "\" square");
   Serial.println("Wheel Diameter: " + String(motionController.getWheelDiameterMm()) + "mm");
   Serial.println("========================================");
@@ -26,6 +32,8 @@ void setup() {
   Serial.println("  R1: Fast mode (100%)");
   Serial.println("  L2: Medium mode (50%)");
   Serial.println("  SELECT: Emergency Stop");
+  Serial.println("  START: Toggle Closed-Loop Control");
+  Serial.println("  R2: Toggle Debug Mode");
   Serial.println("========================================");
 
   // Initialize motion controller (handles PWM setup internally)
@@ -38,7 +46,12 @@ void setup() {
   // Set deadband for joystick mapping
   ps2Controller.setDeadband(motionController.getDeadband());
   
+  // Start with open-loop control
+  motionController.setControlMode(ControlMode::OPEN_LOOP);
+  motionController.enablePIDControl(false);
+  
   Serial.println("Setup complete. Ready to drive!");
+  Serial.println("Press START to enable closed-loop control");
 }
 
 // ---- Main Control Loop ----
@@ -62,6 +75,43 @@ void loop() {
     return;
   }
   
+  // Handle control mode toggles
+  static bool lastStartButton = false;
+  static bool lastR2Button = false;
+  
+  bool startButton = ps2Controller.getButton(PSXBTN_START);
+  bool r2Button = ps2Controller.getButton(PSXBTN_R2);
+  
+  // Toggle closed-loop control
+  if (startButton && !lastStartButton) {
+    closedLoopEnabled = !closedLoopEnabled;
+    motionController.enablePIDControl(closedLoopEnabled);
+    
+    if (closedLoopEnabled) {
+      motionController.setControlMode(ControlMode::VELOCITY_PID);
+      Serial.println("✅ Closed-loop control ENABLED");
+    } else {
+      motionController.setControlMode(ControlMode::OPEN_LOOP);
+      Serial.println("❌ Closed-loop control DISABLED");
+    }
+  }
+  
+  // Toggle debug mode
+  if (r2Button && !lastR2Button) {
+    debugMode = !debugMode;
+    Serial.println(debugMode ? "🐛 Debug mode ENABLED" : "🐛 Debug mode DISABLED");
+  }
+  
+  lastStartButton = startButton;
+  lastR2Button = r2Button;
+  
+  // Update sensors at high rate
+  uint32_t currentTime = millis();
+  if (currentTime - lastSensorUpdate >= 10) { // 100Hz sensor update
+    motionController.updateSensors();
+    lastSensorUpdate = currentTime;
+  }
+  
   // Get control values from controller
   float vx = ps2Controller.getVx();
   float vy = ps2Controller.getVy();
@@ -69,15 +119,28 @@ void loop() {
   float speed_scale = ps2Controller.getSpeedScale();
 
   // Drive using MotionController
-  motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
+  if (closedLoopEnabled) {
+    // Use closed-loop control
+    motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
+  } else {
+    // Use open-loop control (original behavior)
+    motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
+  }
 
   // ---- Status Reporting ----
-  static uint32_t last_status = 0;
-  uint32_t now = millis();
-  if (now - last_status > 500) {  // Every 500ms
-    Serial.printf("vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
-                  vx, vy, wz, speed_scale);
-    last_status = now;
+  if (currentTime - lastDebugPrint >= 500) {  // Every 500ms
+    if (debugMode) {
+      motionController.printDebugInfo();
+      if (closedLoopEnabled) {
+        motionController.printPIDStatus();
+      }
+    } else {
+      // Basic status
+      Serial.printf("Mode: %s | vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
+                    closedLoopEnabled ? "CLOSED" : "OPEN",
+                    vx, vy, wz, speed_scale);
+    }
+    lastDebugPrint = currentTime;
   }
 
   delay(10);  // 100Hz control loop
