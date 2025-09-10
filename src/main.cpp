@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <ICM_20948.h>
 #include "EncoderDriverSimple.h"
+#include "MotorDriver.h"
 
 // ---- Robot Physical Parameters ----
 #define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
@@ -80,6 +81,12 @@ uint32_t last_controller_read = 0;
 float motor_speeds[4] = {0, 0, 0, 0};
 float target_speeds[4] = {0, 0, 0, 0};
 
+// Motor driver objects
+MotorDriver motor1(CH_M1_R, CH_M1_L, M1_RPWM, M1_LPWM, PWM_FREQ, PWM_RES);
+MotorDriver motor2(CH_M2_R, CH_M2_L, M2_RPWM, M2_LPWM, PWM_FREQ, PWM_RES);
+MotorDriver motor3(CH_M3_R, CH_M3_L, M3_RPWM, M3_LPWM, PWM_FREQ, PWM_RES);
+MotorDriver motor4(CH_M4_R, CH_M4_L, M4_RPWM, M4_LPWM, PWM_FREQ, PWM_RES);
+
 // Test modes
 bool encoder_test_mode = false;
 bool imu_test_mode = false;
@@ -92,18 +99,8 @@ uint32_t motor_test_start_time = 0;
 
 // ---- Enhanced PWM Setup ----
 void setupPWM() {
-  Serial.println("Setting up PWM channels...");
-  
-  // Setup all PWM channels with optimized settings for TT motors
-  ledcSetup(CH_M1_R, PWM_FREQ, PWM_RES); ledcAttachPin(M1_RPWM, CH_M1_R);
-  ledcSetup(CH_M1_L, PWM_FREQ, PWM_RES); ledcAttachPin(M1_LPWM, CH_M1_L);
-  ledcSetup(CH_M2_R, PWM_FREQ, PWM_RES); ledcAttachPin(M2_RPWM, CH_M2_R);
-  ledcSetup(CH_M2_L, PWM_FREQ, PWM_RES); ledcAttachPin(M2_LPWM, CH_M2_L);
-  ledcSetup(CH_M3_R, PWM_FREQ, PWM_RES); ledcAttachPin(M3_RPWM, CH_M3_R);
-  ledcSetup(CH_M3_L, PWM_FREQ, PWM_RES); ledcAttachPin(M3_LPWM, CH_M3_L);
-  ledcSetup(CH_M4_R, PWM_FREQ, PWM_RES); ledcAttachPin(M4_RPWM, CH_M4_R);
-  ledcSetup(CH_M4_L, PWM_FREQ, PWM_RES); ledcAttachPin(M4_LPWM, CH_M4_L);
-  
+  Serial.println("Setting up MotorDriver objects...");
+  // MotorDriver constructors already setup PWM
   Serial.println("PWM setup complete");
 }
 
@@ -140,29 +137,14 @@ void initIMU() {
 }
 
 // ---- Enhanced Motor Driver with Safety ----
-void driveBTS7960(int chR, int chL, int duty, int dir) {
-  // Clamp duty cycle
-  duty = constrain(duty, 0, PWM_MAX);
-  
-  if (dir > 0) {
-    ledcWrite(chR, duty);
-    ledcWrite(chL, 0);
-  } else if (dir < 0) {
-    ledcWrite(chR, 0);
-    ledcWrite(chL, duty);
-  } else {
-    ledcWrite(chR, 0);
-    ledcWrite(chL, 0);
-  }
-}
+// MotorDriver class now handles motor control
 
 // ---- Emergency Stop ----
 void emergencyStop() {
-  driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
-  driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
-  driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
-  driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
-  
+  motor1.stop();
+  motor2.stop();
+  motor3.stop();
+  motor4.stop();
   // Reset motor speeds
   for (int i = 0; i < 4; i++) {
     motor_speeds[i] = 0;
@@ -174,18 +156,15 @@ void emergencyStop() {
 void runMotorTest() {
   uint32_t now = millis();
   const int TEST_DURATION = 2000;  // 2 seconds per motor
-  
   if (now - motor_test_start_time > TEST_DURATION) {
-    // Stop current motor
-    driveBTS7960(CH_M1_R, CH_M1_L, 0, 0);
-    driveBTS7960(CH_M2_R, CH_M2_L, 0, 0);
-    driveBTS7960(CH_M3_R, CH_M3_L, 0, 0);
-    driveBTS7960(CH_M4_R, CH_M4_L, 0, 0);
-    
+    // Stop all motors
+    motor1.stop();
+    motor2.stop();
+    motor3.stop();
+    motor4.stop();
     // Move to next motor
     current_test_motor++;
     motor_test_start_time = now;
-    
     if (current_test_motor >= 4) {
       motor_test_mode = false;
       current_test_motor = 0;  // Reset for next time
@@ -193,24 +172,17 @@ void runMotorTest() {
       return;
     }
   }
-  
   // Test current motor
   const char* motor_names[] = {"Front Left", "Front Right", "Rear Left", "Rear Right"};
-  const int motor_channels[][2] = {
-    {CH_M1_R, CH_M1_L},  // Front Left
-    {CH_M2_R, CH_M2_L},  // Front Right  
-    {CH_M3_R, CH_M3_L},  // Rear Left
-    {CH_M4_R, CH_M4_L}   // Rear Right
-  };
-  
+  MotorDriver* motors[] = {&motor1, &motor2, &motor3, &motor4};
   if (now - motor_test_start_time < 1000) {
     // First second: forward
     Serial.printf("Testing %s - FORWARD\n", motor_names[current_test_motor]);
-    driveBTS7960(motor_channels[current_test_motor][0], motor_channels[current_test_motor][1], 512, 1);
+    motors[current_test_motor]->drive(512, 1);
   } else {
     // Second second: backward
     Serial.printf("Testing %s - BACKWARD\n", motor_names[current_test_motor]);
-    driveBTS7960(motor_channels[current_test_motor][0], motor_channels[current_test_motor][1], 512, -1);
+    motors[current_test_motor]->drive(512, -1);
   }
 }
 
@@ -463,10 +435,10 @@ void loop() {
     auto toDuty = [](float speed) { return int(fabsf(speed) * PWM_MAX); };
     auto getDirection = [](float speed) { return (speed > 0) ? 1 : (speed < 0) ? -1 : 0; };
     
-    driveBTS7960(CH_M1_R, CH_M1_L, toDuty(motor_speeds[0]), getDirection(motor_speeds[0]));
-    driveBTS7960(CH_M2_R, CH_M2_L, toDuty(motor_speeds[1]), getDirection(motor_speeds[1]));
-    driveBTS7960(CH_M3_R, CH_M3_L, toDuty(motor_speeds[2]), getDirection(motor_speeds[2]));
-    driveBTS7960(CH_M4_R, CH_M4_L, toDuty(motor_speeds[3]), getDirection(motor_speeds[3]));
+  motor1.drive(toDuty(motor_speeds[0]), getDirection(motor_speeds[0]));
+  motor2.drive(toDuty(motor_speeds[1]), getDirection(motor_speeds[1]));
+  motor3.drive(toDuty(motor_speeds[2]), getDirection(motor_speeds[2]));
+  motor4.drive(toDuty(motor_speeds[3]), getDirection(motor_speeds[3]));
     
     // ---- Status Reporting ----
     static uint32_t last_status = 0;
