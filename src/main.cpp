@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <PSX.h>
 #include <Wire.h>
-#include "MotorDriver.h"
 #include "MotionController.h"
 #include "RobotPins.h"
 
@@ -9,21 +8,6 @@
 #define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
 #define WHEEL_DIAMETER_MM 80       // Wheel diameter (mm)
 #define WHEELBASE_METERS (WHEELBASE_INCHES * 0.0254f)  // Convert to meters
-
-// Pin definitions are now in RobotPins.h
-
-// ---- LEDC channels ----
-enum {
-  CH_M1_R, CH_M1_L,  // Front Left
-  CH_M2_R, CH_M2_L,  // Front Right
-  CH_M3_R, CH_M3_L,  // Rear Left
-  CH_M4_R, CH_M4_L   // Rear Right
-};
-
-// ---- PWM Configuration - Optimized for TT Motors ----
-static const int PWM_FREQ = 16000;  // 16 kHz - better for small TT motors
-static const int PWM_RES  = 10;     // 10-bit (0–1023)
-static const int PWM_MAX  = (1 << PWM_RES) - 1;
 
 // ---- Control Parameters ----
 static const float WHEELBASE_HALF = WHEELBASE_METERS / 2.0f;  // Corrected geometry
@@ -35,55 +19,11 @@ static const float SPEED_SMOOTH = 0.80f;    // Less smoothing for more responsiv
 PSX psx;
 float speed_scale = 0.70f;  // Start with more conservative speed
 
-// Motor driver objects
-MotorDriver motorFL(CH_M1_R, CH_M1_L, M1_RPWM, M1_LPWM, PWM_FREQ, PWM_RES);
-MotorDriver motorFR(CH_M2_R, CH_M2_L, M2_RPWM, M2_LPWM, PWM_FREQ, PWM_RES);
-MotorDriver motorRL(CH_M3_R, CH_M3_L, M3_RPWM, M3_LPWM, PWM_FREQ, PWM_RES);
-MotorDriver motorRR(CH_M4_R, CH_M4_L, M4_RPWM, M4_LPWM, PWM_FREQ, PWM_RES);
-
 // Motion controller
-MotionController motionController(&motorFL, &motorFR, &motorRL, &motorRR);
+MotionController motionController;
 
 bool controller_connected = false;
 uint32_t last_controller_read = 0;
-
-// Motor speed smoothing
-float motor_speeds[4] = {0, 0, 0, 0};
-float target_speeds[4] = {0, 0, 0, 0};
-
-// ---- Enhanced PWM Setup ----
-void setupPWM() {
-  Serial.println("Setting up PWM channels...");
-  
-  // Setup all PWM channels with optimized settings for TT motors
-  ledcSetup(CH_M1_R, PWM_FREQ, PWM_RES); ledcAttachPin(M1_RPWM, CH_M1_R);
-  ledcSetup(CH_M1_L, PWM_FREQ, PWM_RES); ledcAttachPin(M1_LPWM, CH_M1_L);
-  ledcSetup(CH_M2_R, PWM_FREQ, PWM_RES); ledcAttachPin(M2_RPWM, CH_M2_R);
-  ledcSetup(CH_M2_L, PWM_FREQ, PWM_RES); ledcAttachPin(M2_LPWM, CH_M2_L);
-  ledcSetup(CH_M3_R, PWM_FREQ, PWM_RES); ledcAttachPin(M3_RPWM, CH_M3_R);
-  ledcSetup(CH_M3_L, PWM_FREQ, PWM_RES); ledcAttachPin(M3_LPWM, CH_M3_L);
-  ledcSetup(CH_M4_R, PWM_FREQ, PWM_RES); ledcAttachPin(M4_RPWM, CH_M4_R);
-  ledcSetup(CH_M4_L, PWM_FREQ, PWM_RES); ledcAttachPin(M4_LPWM, CH_M4_L);
-  
-  Serial.println("PWM setup complete");
-}
-
-// ---- Enhanced Motor Driver with Safety ----
-void driveBTS7960(int chR, int chL, int duty, int dir) {
-  // Clamp duty cycle
-  duty = constrain(duty, 0, PWM_MAX);
-  
-  if (dir > 0) {
-    ledcWrite(chR, duty);
-    ledcWrite(chL, 0);
-  } else if (dir < 0) {
-    ledcWrite(chR, 0);
-    ledcWrite(chL, duty);
-  } else {
-    ledcWrite(chR, 0);
-    ledcWrite(chL, 0);
-  }
-}
 
 // ---- Emergency Stop ----
 void emergencyStop() {
@@ -130,7 +70,9 @@ void setup() {
   Serial.println("  SELECT: Emergency Stop");
   Serial.println("========================================");
 
-  setupPWM();
+  // Initialize motion controller (handles PWM setup internally)
+  Serial.println("Initializing motion controller...");
+  motionController.initialize();
   
   // Initialize PS2 controller
   Serial.println("Initializing PS2 controller...");
