@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include <PSX.h>
+
 #include <Wire.h>
 #include <ICM_20948.h>
+#include "EncoderDriver.h"
 
 // ---- Robot Physical Parameters ----
 #define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
@@ -76,6 +78,12 @@ float target_speeds[4] = {0, 0, 0, 0};
 // Encoder counts
 volatile int32_t encoder_counts[4] = {0, 0, 0, 0};
 
+// Encoder driver objects
+EncoderDriver encoder1(ENC_M1_A, ENC_M1_B, &encoder_counts[0]);
+EncoderDriver encoder2(ENC_M2_A, ENC_M2_B, &encoder_counts[1]);
+EncoderDriver encoder3(ENC_M3_A, ENC_M3_B, &encoder_counts[2]);
+EncoderDriver encoder4(ENC_M4_A, ENC_M4_B, &encoder_counts[3]);
+
 // IMU data
 struct IMUData {
   float accel_x, accel_y, accel_z;   // Accelerometer (g)
@@ -104,38 +112,7 @@ int current_motor = 0;
 int current_direction = 1; // 1 = forward, -1 = backward
 uint32_t last_button_press = 0;
 
-// ---- Encoder Interrupt Handlers ----
-void IRAM_ATTR enc1_isr() {
-  if (digitalRead(ENC_M1_B)) {
-    encoder_counts[0]++;
-  } else {
-    encoder_counts[0]--;
-  }
-}
-
-void IRAM_ATTR enc2_isr() {
-  if (digitalRead(ENC_M2_B)) {
-    encoder_counts[1]++;
-  } else {
-    encoder_counts[1]--;
-  }
-}
-
-void IRAM_ATTR enc3_isr() {
-  if (digitalRead(ENC_M3_B)) {
-    encoder_counts[2]++;
-  } else {
-    encoder_counts[2]--;
-  }
-}
-
-void IRAM_ATTR enc4_isr() {
-  if (digitalRead(ENC_M4_B)) {
-    encoder_counts[3]++;
-  } else {
-    encoder_counts[3]--;
-  }
-}
+// ...existing code...
 
 // ---- IMU Functions ----
 bool initIMU() {
@@ -234,23 +211,10 @@ void setupPWM() {
 // ---- Encoder Setup ----
 void setupEncoders() {
   Serial.println("🔧 Setting up encoders...");
-  
-  // Configure encoder pins
-  pinMode(ENC_M1_A, INPUT_PULLUP);
-  pinMode(ENC_M1_B, INPUT_PULLUP);
-  pinMode(ENC_M2_A, INPUT_PULLUP);
-  pinMode(ENC_M2_B, INPUT_PULLUP);
-  pinMode(ENC_M3_A, INPUT_PULLUP);
-  pinMode(ENC_M3_B, INPUT_PULLUP);
-  pinMode(ENC_M4_A, INPUT_PULLUP);
-  pinMode(ENC_M4_B, INPUT_PULLUP);
-  
-  // Attach interrupts
-  attachInterrupt(digitalPinToInterrupt(ENC_M1_A), enc1_isr, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_M2_A), enc2_isr, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_M3_A), enc3_isr, RISING);
-  attachInterrupt(digitalPinToInterrupt(ENC_M4_A), enc4_isr, RISING);
-  
+  encoder1.begin();
+  encoder2.begin();
+  encoder3.begin();
+  encoder4.begin();
   Serial.println("✅ Encoders setup complete");
   Serial.println("   M1: A=GPIO21, B=GPIO20");
   Serial.println("   M2: A=GPIO26, B=GPIO48");
