@@ -1,7 +1,6 @@
 #pragma once
 #include <Arduino.h>
 
-
 class EncoderDriver {
 public:
     EncoderDriver(uint8_t pinA, uint8_t pinB, volatile int32_t* countPtr);
@@ -19,4 +18,5 @@ private:
     int _index;
     void handleISR();
     static EncoderDriver* instances[4];
+    static int instanceCount;
 };
