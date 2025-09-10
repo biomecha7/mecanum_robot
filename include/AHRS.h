@@ -1,5 +1,6 @@
 #pragma once
 #include "IMUDriver.h"
+#include "MadgwickAHRS.h"
 
 struct AHRSData {
     float q[4]; // Quaternion
@@ -9,10 +10,10 @@ struct AHRSData {
 
 class AHRS {
 public:
-    AHRS();
+    AHRS(float sampleFreq = 100.0f, float beta = 0.1f);
     void update(const IMUData& imu);
     const AHRSData& getData() const;
 private:
     AHRSData _data;
-    // Add algorithm state variables here
+    MadgwickAHRS _madgwick;
 };

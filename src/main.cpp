@@ -4,6 +4,8 @@
 #include <ICM_20948.h>
 #include "EncoderDriverSimple.h"
 #include "MotorDriver.h"
+#include "IMUDriver.h"
+#include "AHRS.h"
 
 // ---- Robot Physical Parameters ----
 #define WHEELBASE_INCHES 10.75f    // Distance between wheels (inches)
@@ -73,7 +75,8 @@ EncoderDriverSimple encoder3(ENC_M3_A, ENC_M3_B, &encoder_counts[2]);
 EncoderDriverSimple encoder4(ENC_M4_A, ENC_M4_B, &encoder_counts[3]);
 
 // IMU
-ICM_20948_I2C myICM;
+IMUDriver imu(IMU_SDA, IMU_SCL);
+AHRS ahrs(100.0f, 0.1f); // 100Hz, beta=0.1
 bool controller_connected = false;
 uint32_t last_controller_read = 0;
 
