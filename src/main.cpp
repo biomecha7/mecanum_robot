@@ -2,7 +2,6 @@
 #include <PSX.h>
 #include <Wire.h>
 #include <ICM_20948.h>
-#include "EncoderDriverSimple.h"
 #include "MotorDriver.h"
 #include "MotionController.h"
 #include "RobotPins.h"
@@ -37,15 +36,6 @@ static const float SPEED_SMOOTH = 0.80f;    // Less smoothing for more responsiv
 PSX psx;
 float speed_scale = 0.70f;  // Start with more conservative speed
 
-// Encoder counts
-volatile int32_t encoder_counts[4] = {0, 0, 0, 0};
-
-// Encoder driver objects
-EncoderDriverSimple encoder1(ENC_M1_A, ENC_M1_B, &encoder_counts[0]);
-EncoderDriverSimple encoder2(ENC_M2_A, ENC_M2_B, &encoder_counts[1]);
-EncoderDriverSimple encoder3(ENC_M3_A, ENC_M3_B, &encoder_counts[2]);
-EncoderDriverSimple encoder4(ENC_M4_A, ENC_M4_B, &encoder_counts[3]);
-
 // Motor driver objects
 MotorDriver motorFL(CH_M1_R, CH_M1_L, M1_RPWM, M1_LPWM, PWM_FREQ, PWM_RES);
 MotorDriver motorFR(CH_M2_R, CH_M2_L, M2_RPWM, M2_LPWM, PWM_FREQ, PWM_RES);
@@ -79,19 +69,6 @@ void setupPWM() {
   ledcSetup(CH_M4_L, PWM_FREQ, PWM_RES); ledcAttachPin(M4_LPWM, CH_M4_L);
   
   Serial.println("PWM setup complete");
-}
-
-void setupEncoders() {
-  Serial.println("🔧 Setting up encoders...");
-  encoder1.begin();
-  delay(100);
-  encoder2.begin();
-  delay(100);
-  encoder3.begin();
-  delay(100);
-  encoder4.begin();
-  delay(100);
-  Serial.println("✅ Encoders setup complete");
 }
 
 void setupI2C() {
@@ -169,16 +146,13 @@ void setup() {
   Serial.println("Wheel Diameter: " + String(WHEEL_DIAMETER_MM) + "mm");
   Serial.println("========================================");
   Serial.println("🎮 CONTROLS:");
-  Serial.println("  X: Drive (hold to move)");
   Serial.println("  L1: Slow mode (35%)");
   Serial.println("  R1: Fast mode (100%)");
   Serial.println("  L2: Medium mode (50%)");
   Serial.println("  SELECT: Emergency Stop");
-  Serial.println("  R2: Show encoder values");
   Serial.println("========================================");
 
   setupPWM();
-  setupEncoders();
   setupI2C();
   initIMU();
   
@@ -224,17 +198,6 @@ void loop() {
     Serial.println("🛑 EMERGENCY STOP!");
     delay(100);
     return;
-  }
-  
-  // ---- Show Encoder Values ----
-  if (js.buttons & PSXBTN_R2) {
-    static uint32_t last_encoder_print = 0;
-    if (now - last_encoder_print > 200) {
-      Serial.printf("📊 ENCODERS: M1=%d M2=%d M3=%d M4=%d\n",
-                    encoder_counts[0], encoder_counts[1], 
-                    encoder_counts[2], encoder_counts[3]);
-      last_encoder_print = now;
-    }
   }
   
   // ---- Drive Mode ----
