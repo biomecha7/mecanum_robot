@@ -122,21 +122,8 @@ void setupEncoders() {
 
 void setupI2C() {
   Serial.println("🔧 Setting up I2C...");
-  Wire.begin(IMU_SDA, IMU_SCL);
-  Wire.setClock(400000);
+  // IMUDriver handles I2C setup
   Serial.println("✅ I2C setup complete");
-}
-
-void initIMU() {
-  Serial.println("🔧 Initializing IMU...");
-  if (myICM.begin(Wire, 0) == ICM_20948_Stat_Ok) {
-    Serial.println("✅ IMU initialized at address 0x68");
-  } else if (myICM.begin(Wire, 1) == ICM_20948_Stat_Ok) {
-    Serial.println("✅ IMU initialized at address 0x69");
-  } else {
-    Serial.println("❌ IMU initialization failed");
-  }
-  Serial.println("✅ IMU setup complete");
 }
 
 // ---- Enhanced Motor Driver with Safety ----
@@ -235,7 +222,11 @@ void setup() {
   setupPWM();
   setupEncoders();
   setupI2C();
-  initIMU();
+  if (!imu.begin()) {
+    Serial.println("❌ IMU initialization failed");
+  } else {
+    Serial.println("✅ IMU initialized");
+  }
   
   // Initialize PS2 controller
   Serial.println("Initializing PS2 controller...");
@@ -308,20 +299,24 @@ void loop() {
     static uint32_t last_all_sensors = 0;
     if (now - last_all_sensors > 500) {
       Serial.println("\n🔍 === ALL SENSORS TEST ===");
-      
-      // IMU data
-      if (myICM.dataReady()) {
-        myICM.getAGMT();
-        Serial.printf("   IMU: Accel(%.2f,%.2f,%.2f)g | Gyro(%.1f,%.1f,%.1f)dps\n",
-                      myICM.accX(), myICM.accY(), myICM.accZ(),
-                      myICM.gyrX(), myICM.gyrY(), myICM.gyrZ());
+      imu.update();
+      const IMUData& data = imu.getData();
+      Serial.printf("   IMU: Accel(%.2f,%.2f,%.2f)g | Gyro(%.1f,%.1f,%.1f)dps | Mag(%.0f,%.0f,%.0f)µT | Temp=%.1f°C\n",
+                    data.accel_x, data.accel_y, data.accel_z,
+                    data.gyro_x, data.gyro_y, data.gyro_z,
+                    data.mag_x, data.mag_y, data.mag_z,
+                    data.temperature);
+      ahrs.update(data);
+      const AHRSData& ahrsData = ahrs.getData();
+      if (ahrsData.valid) {
+        Serial.printf("   AHRS: Roll=%.2f Pitch=%.2f Yaw=%.2f\n", ahrsData.roll, ahrsData.pitch, ahrsData.yaw);
+      } else {
+        Serial.println("   AHRS: Orientation not valid");
       }
-      
       // Encoder data
       Serial.printf("   ENCODERS: M1=%d M2=%d M3=%d M4=%d\n",
                     encoder_counts[0], encoder_counts[1], 
                     encoder_counts[2], encoder_counts[3]);
-      
       // PS2 data
       Serial.printf("   PS2: LY=%d LX=%d RY=%d RX=%d\n",
                     js.JoyLeftY, js.JoyLeftX, js.JoyRightY, js.JoyRightX);
@@ -363,13 +358,19 @@ void loop() {
   if (imu_test_mode) {
     static uint32_t last_imu_print = 0;
     if (now - last_imu_print > 200) {
-      if (myICM.dataReady()) {
-        myICM.getAGMT();
-        Serial.printf("📊 IMU: Accel(%.2f,%.2f,%.2f)g | Gyro(%.1f,%.1f,%.1f)dps | Mag(%.0f,%.0f,%.0f)µT | Temp=%.1f°C\n",
-                      myICM.accX(), myICM.accY(), myICM.accZ(),
-                      myICM.gyrX(), myICM.gyrY(), myICM.gyrZ(),
-                      myICM.magX(), myICM.magY(), myICM.magZ(),
-                      myICM.temp());
+      imu.update();
+      const IMUData& data = imu.getData();
+      Serial.printf("📊 IMU: Accel(%.2f,%.2f,%.2f)g | Gyro(%.1f,%.1f,%.1f)dps | Mag(%.0f,%.0f,%.0f)µT | Temp=%.1f°C\n",
+                    data.accel_x, data.accel_y, data.accel_z,
+                    data.gyro_x, data.gyro_y, data.gyro_z,
+                    data.mag_x, data.mag_y, data.mag_z,
+                    data.temperature);
+      ahrs.update(data);
+      const AHRSData& ahrsData = ahrs.getData();
+      if (ahrsData.valid) {
+        Serial.printf("📐 AHRS: Roll=%.2f Pitch=%.2f Yaw=%.2f\n", ahrsData.roll, ahrsData.pitch, ahrsData.yaw);
+      } else {
+        Serial.println("📐 AHRS: Orientation not valid");
       }
       last_imu_print = now;
     }
