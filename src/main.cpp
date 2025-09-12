@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include "MotionController.h"
 #include "PS2Controller.h"
+#include <ArduinoJson.h>
 
 // ---- Globals ----
 MotionController motionController;
@@ -142,6 +143,13 @@ void loop() {
     }
     lastDebugPrint = currentTime;
   }
+
+    // Example: send a simple status every second
+    StaticJsonDocument<64> doc;
+    doc["heartbeat"] = millis();  // Send current uptime in ms
+    serializeJson(doc, Serial);
+    Serial.println(); // newline delimiter
+    delay(1000);      // Send every second
 
   delay(10);  // 100Hz control loop
 }
