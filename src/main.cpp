@@ -152,22 +152,47 @@ void HeartbeatTask(void*) {
 }
 
 static const int TELEMETRY_HZ = 2; // Telemetry frequency
+static const int IMU_PUB_HZ = 50; // ROS2-friendly rate over USB
 
 void NetworkTask(void*) {
   const TickType_t period = pdMS_TO_TICKS(1000 / TELEMETRY_HZ);
   TickType_t last = xTaskGetTickCount();
   pinMode(LED_PIN_GRN, OUTPUT);
 
-  for(;;){
-    // toggle LED
-    digitalWrite(LED_PIN_GRN, !digitalRead(LED_PIN_GRN));
-    // TODO: read Serial/LoRa bytes, parse JSON commands (ArduinoJson),
-    //       push commands to a queue (in Step 4), send telemetry
+  // IMU publish cadence
+  const TickType_t imuPeriod = pdMS_TO_TICKS(1000 / IMU_PUB_HZ);
+  TickType_t imuNext = xTaskGetTickCount();
 
-    // Optional light “alive” (keep it tiny; don’t spam)
-    // StaticJsonDocument<64> t;
-    // t["net_alive"] = millis();
-    // serializeJson(t, Serial); Serial.println();
+  for(;;){
+    // existing alive blink
+    digitalWrite(LED_PIN_GRN, !digitalRead(LED_PIN_GRN));
+
+    // ---- IMU JSON publisher (50 Hz) ----
+    if ((int32_t)(xTaskGetTickCount() - imuNext) >= 0) {
+      imuNext += imuPeriod;
+
+      IMUData s{};
+      // Prefer the queue (non-blocking). If empty, fall back to mailbox snapshot.
+      if (!imuTask.getLatestData(s, 0)) {           // queue pop (single-consumer)
+        imuTask.peekLatestData(s);                  // mailbox copy (multi-consumer)
+      }
+
+      if (s.data_ready) {
+        StaticJsonDocument<256> msg;
+        msg["type"]   = "imu";
+        msg["t_ms"]   = s.last_read;               // IMU driver timestamp
+        auto a = msg.createNestedArray("accel_g"); // accel in g
+        a.add(s.accel_x); a.add(s.accel_y); a.add(s.accel_z);
+        auto g = msg.createNestedArray("gyro_dps"); // gyro in deg/s
+        g.add(s.gyro_x); g.add(s.gyro_y); g.add(s.gyro_z);
+        auto m = msg.createNestedArray("mag_uT");   // mag in µT (per driver)
+        m.add(s.mag_x);  m.add(s.mag_y);  m.add(s.mag_z);
+        msg["temp_c"] = s.temperature;             // °C
+
+        serializeJson(msg, Serial);
+        Serial.println(); // newline frame for the Pi reader
+      }
+    }
 
     vTaskDelayUntil(&last, period);
   }
@@ -227,7 +252,14 @@ void setup() {
   // Start network task
   xTaskCreatePinnedToCore(NetworkTask, "NetworkTask", 8192, nullptr, 2, nullptr, 0); // priority 2 on core 0
   
-  // Note: IMU task is started in setup() above
+  Serial.println("Initializing IMU task...");
+  if (!imuTask.initialize()) {
+    Serial.println("⚠️ IMU init failed — continuing without IMU");
+  } else {
+    if (!imuTask.start()) {
+      Serial.println("⚠️ IMU task start failed — continuing without IMU");
+    }
+  }
 }
 
 void loop() {

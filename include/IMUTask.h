@@ -77,11 +77,20 @@ public:
      */
     void getStats(uint32_t& update_count, uint32_t& last_update_ms) const;
 
+    bool peekLatestData(IMUData& out) {
+        taskENTER_CRITICAL(&_mux);
+        out = _latest;
+        taskEXIT_CRITICAL(&_mux);
+        return out.data_ready;
+    }
+
 private:
     IMUDriver* _imu_driver;           // IMU driver instance
     TaskHandle_t _task_handle;        // FreeRTOS task handle
     QueueHandle_t _data_queue;        // Queue for sharing IMU data
     uint8_t _sda, _scl;               // I2C pin assignments
+    IMUData _latest;                    // Latest IMU data
+    portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED; // Mutex for data access
     
     // Task statistics
     uint32_t _update_count;          // Number of updates performed
