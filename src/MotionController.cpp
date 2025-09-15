@@ -22,7 +22,7 @@ static constexpr float MAX_WZ_RAD  = 2.50f;   // was 1.50
 MotionController::MotionController() 
     : m_frontLeft(nullptr), m_frontRight(nullptr), m_rearLeft(nullptr), m_rearRight(nullptr),
       m_encoderFL(nullptr), m_encoderFR(nullptr), m_encoderRL(nullptr), m_encoderRR(nullptr),
-      m_imu(nullptr), _control_mode(ControlMode::OPEN_LOOP), _pid_enabled(false),
+      _control_mode(ControlMode::OPEN_LOOP), _pid_enabled(false),
       m_targetHeading(0.0f) {
     
     // Initialize encoder counts
@@ -56,9 +56,6 @@ MotionController::~MotionController() {
     if (m_encoderRL) delete m_encoderRL;
     if (m_encoderRR) delete m_encoderRR;
     
-    // Clean up IMU
-    if (m_imu) delete m_imu;
-    
     // Clean up PID controllers
     for (int i = 0; i < 4; i++) {
         if (m_velocityPID[i]) delete m_velocityPID[i];
@@ -84,10 +81,6 @@ void MotionController::initialize() {
     m_encoderFR->begin();
     m_encoderRL->begin();
     m_encoderRR->begin();
-    
-    // Create IMU instance
-    m_imu = new IMUDriver(IMU_SDA, IMU_SCL);
-    m_imu->begin();
     
     // Create PID controllers
     PIDConfig velocityConfig = PIDController::getWheelVelocityConfig();
@@ -170,11 +163,6 @@ void MotionController::stop() {
 }
 
 void MotionController::updateSensors() {
-    // Update IMU
-    if (m_imu) {
-        m_imu->update();
-    }
-    
     // Update wheel velocities from encoders
     _updateWheelVelocities();
     
@@ -251,16 +239,8 @@ void MotionController::_updateRobotPose() {
         _state.x += (avg_vx * cos_h - avg_vy * sin_h) * dt;
         _state.y += (avg_vx * sin_h + avg_vy * cos_h) * dt;
         
-        // Update heading from IMU
-        if (m_imu) {
-            const IMUData& imu_data = m_imu->getData();
-            if (imu_data.data_ready) {
-                _state.heading += imu_data.gyro_z * DEG_TO_RAD * dt;
-                // Normalize heading to [-PI, PI]
-                while (_state.heading > PI) _state.heading -= 2*PI;
-                while (_state.heading < -PI) _state.heading += 2*PI;
-            }
-        }
+        // Note: Heading update from IMU will be handled by dedicated IMU task
+        // For now, heading is not updated from IMU data
         
         _state.last_update_ms = current_time;
     }

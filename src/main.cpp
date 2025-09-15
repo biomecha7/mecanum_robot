@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include "MotionController.h"
 #include "PS2Controller.h"
+#include "IMUTask.h"
 #include <ArduinoJson.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -9,6 +10,7 @@
 // ---- Globals ----
 MotionController motionController;
 PS2Controller ps2Controller;
+IMUTask imuTask(IMU_SDA, IMU_SCL);
 
 // FOR DEBUGGING and STATUS
 static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
@@ -107,6 +109,15 @@ void ControlTask(void*) {
       if (debugMode) {
         motionController.printDebugInfo();
         if (closedLoopEnabled) motionController.printPIDStatus();
+        
+        // Print IMU data if available
+        IMUData imu_data;
+        if (imuTask.getLatestData(imu_data, 0)) {  // Non-blocking
+          Serial.printf("IMU: accel(%.2f,%.2f,%.2f) gyro(%.2f,%.2f,%.2f) temp=%.1f°C\n",
+                        imu_data.accel_x, imu_data.accel_y, imu_data.accel_z,
+                        imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z,
+                        imu_data.temperature);
+        }
       } else {
         Serial.printf("Mode: %s | vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
                       closedLoopEnabled ? "CLOSED" : "OPEN",
@@ -187,6 +198,16 @@ void setup() {
   // Initialize PS2 controller
   ps2Controller.initialize();
   
+  // Initialize IMU task
+  Serial.println("Initializing IMU task...");
+  if (!imuTask.initialize()) {
+    Serial.println("❌ IMU task initialization failed");
+  } else if (!imuTask.start()) {
+    Serial.println("❌ IMU task start failed");
+  } else {
+    Serial.println("✅ IMU task started successfully");
+  }
+  
   // Set deadband for joystick mapping
   ps2Controller.setDeadband(motionController.getDeadband());
   
@@ -205,6 +226,8 @@ void setup() {
 
   // Start network task
   xTaskCreatePinnedToCore(NetworkTask, "NetworkTask", 8192, nullptr, 2, nullptr, 0); // priority 2 on core 0
+  
+  // Note: IMU task is started in setup() above
 }
 
 void loop() {

@@ -1,7 +1,6 @@
 #pragma once
 #include "MotorDriver.h"
 #include "EncoderDriver.h"
-#include "IMUDriver.h"
 #include "PIDController.h"
 #include "RobotPins.h"
 
@@ -98,7 +97,6 @@ private:
     EncoderDriver* m_encoderFR;
     EncoderDriver* m_encoderRL;
     EncoderDriver* m_encoderRR;
-    IMUDriver* m_imu;
     
     // Filtered wheel velocity (EMA) used by the velocity PID
     float m_wheelVelFilt[4];
