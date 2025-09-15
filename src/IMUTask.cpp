@@ -54,7 +54,7 @@ bool IMUTask::start() {
         this,                  // Task parameters (this instance)
         IMU_TASK_PRIORITY,     // Task priority
         &_task_handle,        // Task handle
-        0                      // Core to run on (core 0)
+        1                      // Core to run on (core 1 same as ControlTask)
     );
     
     if (result != pdPASS) {
