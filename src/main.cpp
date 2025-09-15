@@ -14,8 +14,6 @@ static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_YLW = GPIO_NUM_41; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_GRN = GPIO_NUM_40; // On-board LED for ESP32
 
-static const int CONTROL_HZ = 100; // Control loop frequency
-
 // ---- Control State ----
 bool closedLoopEnabled = false;
 bool debugMode = false;
@@ -26,6 +24,8 @@ uint32_t lastSensorUpdate = 0;
 void emergencyStop() {
   motionController.stop();
 }
+
+static const int CONTROL_HZ = 100; // Control loop frequency
 
 void ControlTask(void*) {
   const TickType_t period = pdMS_TO_TICKS(1000 / CONTROL_HZ);
@@ -131,6 +131,28 @@ void HeartbeatTask(void*) {
   }
 }
 
+static const int TELEMETRY_HZ = 2; // Telemetry frequency
+
+void NETWORKTASK(void*) {
+  const TickType_t period = pdMS_TO_TICKS(1000 / TELEMETRY_HZ);
+  TickType_t last = xTaskGetTickCount();
+  pinMode(LED_PIN_GRN, OUTPUT);
+
+  for(;;){
+    // toggle LED
+    digitalWrite(LED_PIN_GRN, !digitalRead(LED_PIN_GRN));
+    // TODO: read Serial/LoRa bytes, parse JSON commands (ArduinoJson),
+    //       push commands to a queue (in Step 4), send telemetry
+
+    // Optional light “alive” (keep it tiny; don’t spam)
+    // StaticJsonDocument<64> t;
+    // t["net_alive"] = millis();
+    // serializeJson(t, Serial); Serial.println();
+
+    vTaskDelayUntil(&last, period);
+  }
+}
+
 // ---- Setup ----
 void setup() {
   Serial.begin(115200);
@@ -171,6 +193,9 @@ void setup() {
 
   // Start control task
   xTaskCreatePinnedToCore(ControlTask, "ControlTask", 8192, nullptr, 4, nullptr, 1); // priority 4 on core 1
+
+  // Start network task
+  xTaskCreatePinnedToCore(NETWORKTASK, "NetworkTask", 8192, nullptr, 2, nullptr, 0); // priority 2 on core 0
 }
 
 void loop() {
