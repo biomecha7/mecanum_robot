@@ -10,17 +10,19 @@
 MotionController motionController;
 PS2Controller ps2Controller;
 
-static const gpio_num_t LED_PIN = GPIO_NUM_35; // On-board LED for ESP32
+static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
+static const gpio_num_t LED_PIN_YLW = GPIO_NUM_41; // On-board LED for ESP32
+static const gpio_num_t LED_PIN_GRN = GPIO_NUM_40; // On-board LED for ESP32
 
 // 1 Hz heartbeat task
 void HeartbeatTask(void*) {
-  pinMode(LED_PIN, OUTPUT);
+  pinMode(LED_PIN_RED, OUTPUT);
   const TickType_t period = pdMS_TO_TICKS(500); // 500ms toggle
   TickType_t last = xTaskGetTickCount();
 
   for (;;) {
     // toggle LED
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    digitalWrite(LED_PIN_RED, !digitalRead(LED_PIN_RED));
 
     // JSON heartbeat
     StaticJsonDocument<64> doc;
