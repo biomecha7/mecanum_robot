@@ -3,10 +3,34 @@
 #include "MotionController.h"
 #include "PS2Controller.h"
 #include <ArduinoJson.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // ---- Globals ----
 MotionController motionController;
 PS2Controller ps2Controller;
+
+static const gpio_num_t LED_PIN = GPIO_NUM_35; // On-board LED for ESP32
+
+// 1 Hz heartbeat task
+void HeartbeatTask(void*) {
+  pinMode(LED_PIN, OUTPUT);
+  const TickType_t period = pdMS_TO_TICKS(500); // 500ms toggle
+  TickType_t last = xTaskGetTickCount();
+
+  for (;;) {
+    // toggle LED
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+
+    // JSON heartbeat
+    StaticJsonDocument<64> doc;
+    doc["heartbeat"] = millis();  // Send current uptime in ms
+    serializeJson(doc, Serial);
+    Serial.println(); // newline delimiter
+
+    vTaskDelayUntil(&last, period);
+  }
+}
 
 // ---- Control State ----
 bool closedLoopEnabled = false;
@@ -53,6 +77,9 @@ void setup() {
   
   Serial.println("Setup complete. Ready to drive!");
   Serial.println("Press START to enable closed-loop control");
+  
+  // Start heartbeat task
+  xTaskCreate(HeartbeatTask, "HeartbeatTask", 4096, nullptr, 1, nullptr);
 }
 
 // ---- Main Control Loop ----
@@ -143,13 +170,6 @@ void loop() {
     }
     lastDebugPrint = currentTime;
   }
-
-    // Example: send a simple status every second
-    StaticJsonDocument<64> doc;
-    doc["heartbeat"] = millis();  // Send current uptime in ms
-    serializeJson(doc, Serial);
-    Serial.println(); // newline delimiter
-    delay(1000);      // Send every second
 
   delay(10);  // 100Hz control loop
 }
