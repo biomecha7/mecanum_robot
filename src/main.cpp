@@ -13,7 +13,7 @@ PS2Controller ps2Controller;
 // FOR DEBUGGING and STATUS
 static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_GRN = GPIO_NUM_41; // On-board LED for ESP32
-static const gpio_num_t LED_PIN_TLW = GPIO_NUM_40; // On-board LED for ESP32
+static const gpio_num_t LED_PIN_YLW = GPIO_NUM_40; // On-board LED for ESP32
 
 // ---- Control State ----
 bool closedLoopEnabled = false;
@@ -31,6 +31,8 @@ static const int CONTROL_HZ = 100; // Control loop frequency
 void ControlTask(void*) {
   const TickType_t period = pdMS_TO_TICKS(1000 / CONTROL_HZ);
   TickType_t last = xTaskGetTickCount();
+
+  pinMode(LED_PIN_YLW, OUTPUT);
 
   for (;;) {
     // Update controller and check if we have valid data
@@ -67,9 +69,13 @@ void ControlTask(void*) {
       if (closedLoopEnabled) {
         motionController.setControlMode(ControlMode::VELOCITY_PID);
         Serial.println("✅ Closed-loop control ENABLED");
+        // turn on LED to indicate closed-loop mode
+        digitalWrite(LED_PIN_YLW, true);
       } else {
         motionController.setControlMode(ControlMode::OPEN_LOOP);
         Serial.println("❌ Closed-loop control DISABLED");
+        // turn off LED to indicate open-loop mode
+        digitalWrite(LED_PIN_YLW, false);
       }
     }
 
