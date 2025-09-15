@@ -10,9 +10,10 @@
 MotionController motionController;
 PS2Controller ps2Controller;
 
+// FOR DEBUGGING and STATUS
 static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
-static const gpio_num_t LED_PIN_YLW = GPIO_NUM_41; // On-board LED for ESP32
-static const gpio_num_t LED_PIN_GRN = GPIO_NUM_40; // On-board LED for ESP32
+static const gpio_num_t LED_PIN_GRN = GPIO_NUM_41; // On-board LED for ESP32
+static const gpio_num_t LED_PIN_TLW = GPIO_NUM_40; // On-board LED for ESP32
 
 // ---- Control State ----
 bool closedLoopEnabled = false;
@@ -111,10 +112,12 @@ void ControlTask(void*) {
   }
 }
 
+static const int HEARTBEAT_HZ = 1;  
+
 // 1 Hz heartbeat task
 void HeartbeatTask(void*) {
   pinMode(LED_PIN_RED, OUTPUT);
-  const TickType_t period = pdMS_TO_TICKS(1000); // 1000ms toggle
+  const TickType_t period = pdMS_TO_TICKS(1000 / HEARTBEAT_HZ); // 1000ms toggle
   TickType_t last = xTaskGetTickCount();
 
   for (;;) {
@@ -133,7 +136,7 @@ void HeartbeatTask(void*) {
 
 static const int TELEMETRY_HZ = 2; // Telemetry frequency
 
-void NETWORKTASK(void*) {
+void NetworkTask(void*) {
   const TickType_t period = pdMS_TO_TICKS(1000 / TELEMETRY_HZ);
   TickType_t last = xTaskGetTickCount();
   pinMode(LED_PIN_GRN, OUTPUT);
@@ -189,13 +192,13 @@ void setup() {
   Serial.println("Press START to enable closed-loop control");
   
   // Start heartbeat task
-  xTaskCreate(HeartbeatTask, "HeartbeatTask", 4096, nullptr, 1, nullptr);
+  xTaskCreatePinnedToCore(HeartbeatTask, "HeartbeatTask", 8192, nullptr, 1, nullptr, 0); // priority 1 on core 0
 
   // Start control task
   xTaskCreatePinnedToCore(ControlTask, "ControlTask", 8192, nullptr, 4, nullptr, 1); // priority 4 on core 1
 
   // Start network task
-  xTaskCreatePinnedToCore(NETWORKTASK, "NetworkTask", 8192, nullptr, 2, nullptr, 0); // priority 2 on core 0
+  xTaskCreatePinnedToCore(NetworkTask, "NetworkTask", 8192, nullptr, 2, nullptr, 0); // priority 2 on core 0
 }
 
 void loop() {
