@@ -14,10 +14,107 @@ static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_YLW = GPIO_NUM_41; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_GRN = GPIO_NUM_40; // On-board LED for ESP32
 
+static const int CONTROL_HZ = 100; // Control loop frequency
+
+// ---- Control State ----
+bool closedLoopEnabled = false;
+bool debugMode = false;
+uint32_t lastDebugPrint = 0;
+uint32_t lastSensorUpdate = 0;
+
+// ---- Emergency Stop ----
+void emergencyStop() {
+  motionController.stop();
+}
+
+void ControlTask(void*) {
+  const TickType_t period = pdMS_TO_TICKS(1000 / CONTROL_HZ);
+  TickType_t last = xTaskGetTickCount();
+
+  for (;;) {
+    // Update controller and check if we have valid data
+    if (!ps2Controller.update()) {
+      if (ps2Controller.isEmergencyStop()) {
+        emergencyStop();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelayUntil(&last, period);
+        continue;
+      }
+      vTaskDelay(pdMS_TO_TICKS(10));   // short yield if no controller
+      vTaskDelayUntil(&last, period);
+      continue;
+    }
+
+    // Emergency stop
+    if (ps2Controller.isEmergencyStop()) {
+      emergencyStop();
+      vTaskDelay(pdMS_TO_TICKS(100));
+      vTaskDelayUntil(&last, period);
+      continue;
+    }
+
+    // Handle control mode toggles
+    static bool lastStartButton = false;
+    static bool lastR2Button = false;
+
+    bool startButton = ps2Controller.getButton(PSXBTN_START);
+    bool r2Button    = ps2Controller.getButton(PSXBTN_R2);
+
+    if (startButton && !lastStartButton) {
+      closedLoopEnabled = !closedLoopEnabled;
+      motionController.enablePIDControl(closedLoopEnabled);
+      if (closedLoopEnabled) {
+        motionController.setControlMode(ControlMode::VELOCITY_PID);
+        Serial.println("✅ Closed-loop control ENABLED");
+      } else {
+        motionController.setControlMode(ControlMode::OPEN_LOOP);
+        Serial.println("❌ Closed-loop control DISABLED");
+      }
+    }
+
+    if (r2Button && !lastR2Button) {
+      debugMode = !debugMode;
+      Serial.println(debugMode ? "🐛 Debug mode ENABLED" : "🐛 Debug mode DISABLED");
+    }
+
+    lastStartButton = startButton;
+    lastR2Button = r2Button;
+
+    // Update sensors at ~100 Hz
+    uint32_t currentTime = millis();
+    if (currentTime - lastSensorUpdate >= 10) {
+      motionController.updateSensors();
+      lastSensorUpdate = currentTime;
+    }
+
+    // Drive
+    float vx = ps2Controller.getVx();
+    float vy = ps2Controller.getVy();
+    float wz = ps2Controller.getWz();
+    float speed_scale = ps2Controller.getSpeedScale();
+
+    motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
+
+    // Status / debug (unchanged timing)
+    if (currentTime - lastDebugPrint >= 500) {
+      if (debugMode) {
+        motionController.printDebugInfo();
+        if (closedLoopEnabled) motionController.printPIDStatus();
+      } else {
+        Serial.printf("Mode: %s | vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
+                      closedLoopEnabled ? "CLOSED" : "OPEN",
+                      vx, vy, wz, speed_scale);
+      }
+      lastDebugPrint = currentTime;
+    }
+    vTaskDelayUntil(&last, period);
+  }
+}
+
 // 1 Hz heartbeat task
 void HeartbeatTask(void*) {
   pinMode(LED_PIN_RED, OUTPUT);
-  const TickType_t period = pdMS_TO_TICKS(500); // 500ms toggle
+  const TickType_t period = pdMS_TO_TICKS(1000); // 1000ms toggle
   TickType_t last = xTaskGetTickCount();
 
   for (;;) {
@@ -32,17 +129,6 @@ void HeartbeatTask(void*) {
 
     vTaskDelayUntil(&last, period);
   }
-}
-
-// ---- Control State ----
-bool closedLoopEnabled = false;
-bool debugMode = false;
-uint32_t lastDebugPrint = 0;
-uint32_t lastSensorUpdate = 0;
-
-// ---- Emergency Stop ----
-void emergencyStop() {
-  motionController.stop();
 }
 
 // ---- Setup ----
@@ -82,96 +168,11 @@ void setup() {
   
   // Start heartbeat task
   xTaskCreate(HeartbeatTask, "HeartbeatTask", 4096, nullptr, 1, nullptr);
+
+  // Start control task
+  xTaskCreatePinnedToCore(ControlTask, "ControlTask", 8192, nullptr, 4, nullptr, 1); // priority 4 on core 1
 }
 
-// ---- Main Control Loop ----
 void loop() {
-  // Update controller and check if we have valid data
-  if (!ps2Controller.update()) {
-    // Controller not connected or emergency stop
-    if (ps2Controller.isEmergencyStop()) {
-      emergencyStop();
-      delay(100);
-      return;
-    }
-    delay(10);
-    return;
-  }
-  
-  // Check for emergency stop
-  if (ps2Controller.isEmergencyStop()) {
-    emergencyStop();
-    delay(100);
-    return;
-  }
-  
-  // Handle control mode toggles
-  static bool lastStartButton = false;
-  static bool lastR2Button = false;
-  
-  bool startButton = ps2Controller.getButton(PSXBTN_START);
-  bool r2Button = ps2Controller.getButton(PSXBTN_R2);
-  
-  // Toggle closed-loop control
-  if (startButton && !lastStartButton) {
-    closedLoopEnabled = !closedLoopEnabled;
-    motionController.enablePIDControl(closedLoopEnabled);
-    
-    if (closedLoopEnabled) {
-      motionController.setControlMode(ControlMode::VELOCITY_PID);
-      Serial.println("✅ Closed-loop control ENABLED");
-    } else {
-      motionController.setControlMode(ControlMode::OPEN_LOOP);
-      Serial.println("❌ Closed-loop control DISABLED");
-    }
-  }
-  
-  // Toggle debug mode
-  if (r2Button && !lastR2Button) {
-    debugMode = !debugMode;
-    Serial.println(debugMode ? "🐛 Debug mode ENABLED" : "🐛 Debug mode DISABLED");
-  }
-  
-  lastStartButton = startButton;
-  lastR2Button = r2Button;
-  
-  // Update sensors at high rate
-  uint32_t currentTime = millis();
-  if (currentTime - lastSensorUpdate >= 10) { // 100Hz sensor update
-    motionController.updateSensors();
-    lastSensorUpdate = currentTime;
-  }
-  
-  // Get control values from controller
-  float vx = ps2Controller.getVx();
-  float vy = ps2Controller.getVy();
-  float wz = ps2Controller.getWz();
-  float speed_scale = ps2Controller.getSpeedScale();
-
-  // Drive using MotionController
-  if (closedLoopEnabled) {
-    // Use closed-loop control
-    motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
-  } else {
-    // Use open-loop control (original behavior)
-    motionController.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
-  }
-
-  // ---- Status Reporting ----
-  if (currentTime - lastDebugPrint >= 500) {  // Every 500ms
-    if (debugMode) {
-      motionController.printDebugInfo();
-      if (closedLoopEnabled) {
-        motionController.printPIDStatus();
-      }
-    } else {
-      // Basic status
-      Serial.printf("Mode: %s | vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
-                    closedLoopEnabled ? "CLOSED" : "OPEN",
-                    vx, vy, wz, speed_scale);
-    }
-    lastDebugPrint = currentTime;
-  }
-
-  delay(10);  // 100Hz control loop
+  // empty - all work is done in FreeRTOS tasks
 }
