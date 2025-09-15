@@ -108,28 +108,31 @@ void IMUTask::taskLoop() {
             
             // Get latest data
             const IMUData& imu_data = _imu_driver->getData();
-            if (imu_data.data_ready) {
+            
+            // Send data to queue if available
+            if (imu_data.data_ready && _data_queue != nullptr) {
                 // Store latest data with mutex protection
                 taskENTER_CRITICAL(&_mux);
                 _latest = imu_data;
                 taskEXIT_CRITICAL(&_mux);
-            }
-
-            if (_data_queue) {
-                if (xQueueSend(_data_queue, &imu_data, 0) != pdTRUE) {
-                    // Queue full, remove oldest and add new
+                
+                // Try to send data to queue (non-blocking)
+                BaseType_t result = xQueueSend(_data_queue, &imu_data, 0);
+                
+                if (result != pdTRUE) {
+                    // Queue is full, remove oldest data and add new data
                     IMUData dummy;
-                    xQueueReceive(_data_queue, &dummy, 0);
-                    xQueueSend(_data_queue, &imu_data, 0);
+                    xQueueReceive(_data_queue, &dummy, 0);  // Remove oldest
+                    xQueueSend(_data_queue, &imu_data, 0);  // Add new
                 }
+                
+                // Update statistics
+                _update_count++;
+                _last_update_ms = millis();
             }
-            
-        // Update statistics
-        _update_count++;
-        _last_update_ms = millis();
+        }
         
         // Wait for next cycle
         vTaskDelayUntil(&last_wake_time, period);
-        }
     }
 }

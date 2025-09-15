@@ -251,15 +251,6 @@ void setup() {
 
   // Start network task
   xTaskCreatePinnedToCore(NetworkTask, "NetworkTask", 8192, nullptr, 2, nullptr, 0); // priority 2 on core 0
-  
-  Serial.println("Initializing IMU task...");
-  if (!imuTask.initialize()) {
-    Serial.println("⚠️ IMU init failed — continuing without IMU");
-  } else {
-    if (!imuTask.start()) {
-      Serial.println("⚠️ IMU task start failed — continuing without IMU");
-    }
-  }
 }
 
 void loop() {
