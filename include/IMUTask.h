@@ -3,9 +3,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include <ArduinoJson.h>
 
 // ---- IMU Task Configuration ----
 #define IMU_TASK_FREQUENCY_HZ 200    // IMU update frequency
+#define IMU_PUBLISH_FREQUENCY_HZ 50  // IMU publish frequency (to serial/ROS2)
 #define IMU_TASK_STACK_SIZE 4096      // Stack size for IMU task
 #define IMU_TASK_PRIORITY 3           // Task priority (higher = more important)
 
@@ -77,6 +79,11 @@ public:
      */
     void getStats(uint32_t& update_count, uint32_t& last_update_ms) const;
 
+    /**
+     * @brief Peek at latest IMU data without removing from queue
+     * @param out Reference to IMUData structure to fill
+     * @return true if valid data was copied, false otherwise
+     */
     bool peekLatestData(IMUData& out) {
         taskENTER_CRITICAL(&_mux);
         out = _latest;
@@ -84,17 +91,26 @@ public:
         return out.data_ready;
     }
 
+    /**
+     * @brief Set the IMU publish frequency (Hz)
+     * @param hz Publish frequency in Hz
+     */
+    void setPublishFrequency(uint16_t hz) { _publish_frequency_hz = hz; }
+
 private:
     IMUDriver* _imu_driver;           // IMU driver instance
     TaskHandle_t _task_handle;        // FreeRTOS task handle
     QueueHandle_t _data_queue;        // Queue for sharing IMU data
     uint8_t _sda, _scl;               // I2C pin assignments
-    IMUData _latest;                    // Latest IMU data
+    IMUData _latest;                  // Latest IMU data
     portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED; // Mutex for data access
     
     // Task statistics
-    uint32_t _update_count;          // Number of updates performed
+    uint32_t _update_count;           // Number of updates performed
     uint32_t _last_update_ms;         // Last update timestamp
+    
+    // IMU publish frequency
+    uint16_t _publish_frequency_hz = IMU_PUBLISH_FREQUENCY_HZ;
     
     /**
      * @brief Static task function for FreeRTOS

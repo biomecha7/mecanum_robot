@@ -97,7 +97,9 @@ void IMUTask::taskFunction(void* pvParameters) {
 
 void IMUTask::taskLoop() {
     const TickType_t period = pdMS_TO_TICKS(1000 / IMU_TASK_FREQUENCY_HZ);
+    const TickType_t pub_period = pdMS_TO_TICKS(1000 / _publish_frequency_hz);
     TickType_t last_wake_time = xTaskGetTickCount();
+    TickType_t last_pub_time = xTaskGetTickCount();
     
     Serial.println("🔄 IMU task loop started");
     
@@ -129,6 +131,24 @@ void IMUTask::taskLoop() {
                 // Update statistics
                 _update_count++;
                 _last_update_ms = millis();
+                
+                // Publish IMU data to serial at publish frequency
+                if ((int32_t)(xTaskGetTickCount() - last_pub_time) >= 0) {
+                    last_pub_time += pub_period;
+                    // Serialize as JSON (ArduinoJson)
+                    StaticJsonDocument<256> msg;
+                    msg["type"]   = "imu";
+                    msg["t_ms"]   = imu_data.last_read;
+                    auto a = msg.createNestedArray("accel_g");
+                    a.add(imu_data.accel_x); a.add(imu_data.accel_y); a.add(imu_data.accel_z);
+                    auto g = msg.createNestedArray("gyro_dps");
+                    g.add(imu_data.gyro_x); g.add(imu_data.gyro_y); g.add(imu_data.gyro_z);
+                    auto m = msg.createNestedArray("mag_uT");
+                    m.add(imu_data.mag_x);  m.add(imu_data.mag_y);  m.add(imu_data.mag_z);
+                    msg["temp_c"] = imu_data.temperature;
+                    serializeJson(msg, Serial);
+                    Serial.println();
+                }
             }
         }
         
