@@ -57,24 +57,25 @@ bool PS2Controller::getButtonReleased(uint16_t button) const {
 }
 
 void PS2Controller::processButtons(const PSX::PSXDATA& js) {
-    // ESTOP Clear: SELECT + START held for 2 seconds
+    // ESTOP Clear: SELECT + START held for 1 second (reduced from 2)
     if (m_emergency_stop && (js.buttons & PSXBTN_SELECT) && (js.buttons & PSXBTN_START)) {
         if (m_estop_clear_start == 0) {
             m_estop_clear_start = millis();
-        } else if (millis() - m_estop_clear_start > 2000) {
+            Serial.println("🔄 Clearing ESTOP... Hold SELECT+START for 1 second");
+        } else if (millis() - m_estop_clear_start > 1000) {
             m_emergency_stop = false;
             m_estop_clear_start = 0;
-            Serial.println("✅ ESTOP CLEARED! Press SELECT+START for 2 seconds to clear.");
+            Serial.println("✅ ESTOP CLEARED! Robot ready.");
         }
         return; // Don't process other buttons during ESTOP clear
     } else {
         m_estop_clear_start = 0; // Reset if buttons released
     }
     
-    // Emergency Stop (only if not already in ESTOP)
-    if (!m_emergency_stop && (js.buttons & PSXBTN_SELECT)) {
+    // Emergency Stop: Changed to require START button instead of SELECT to avoid accidental triggers
+    if (!m_emergency_stop && (js.buttons & PSXBTN_START) && (js.buttons & PSXBTN_TRIANGLE)) {
         m_emergency_stop = true;
-        Serial.println("🛑 EMERGENCY STOP! Press SELECT+START for 2 seconds to clear.");
+        Serial.println("🛑 EMERGENCY STOP! Press SELECT+START for 1 second to clear.");
         return;
     }
     
