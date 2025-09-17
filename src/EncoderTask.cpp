@@ -188,7 +188,7 @@ void EncoderTask::taskLoop() {
         // Update calculations every cycle
         updateCalculations();
         
-        // Publish to queue at specified frequency
+        // Publish to queue and JSON at specified frequency
         if ((int32_t)(xTaskGetTickCount() - last_pub_time) >= 0) {
             last_pub_time += pub_period;
             
@@ -202,12 +202,21 @@ void EncoderTask::taskLoop() {
             
             // Fill encoder data
             for (int i = 0; i < 4; i++) {
+                // Calculate fresh position and velocity data
+                float distance_mm = _encoder_counts[i] * MM_PER_PULSE;
+                float position_rad = distance_mm / WHEEL_RADIUS_MM;
+                
+                int32_t count_delta = _encoder_counts[i] - _last_counts[i];
+                float velocity_ms = calculateFilteredVelocity(count_delta, queue_data.dt_ms, _velocity_filters[i]);
+                float angular_velocity_rads = velocity_ms / (WHEEL_RADIUS_MM / 1000.0f); // m/s to rad/s
+                
+                // Fill queue data with calculated values
                 queue_data.counts[i] = _encoder_counts[i];
-                queue_data.count_deltas[i] = _encoder_counts[i] - _last_counts[i];
-                queue_data.positions_rad[i] = _atomic_data.positions_rad[i];
-                queue_data.positions_mm[i] = _encoder_counts[i] * MM_PER_PULSE;
-                queue_data.velocities_ms[i] = _atomic_data.velocities_ms[i];
-                queue_data.angular_velocities_rads[i] = _atomic_data.angular_velocities_rads[i];
+                queue_data.count_deltas[i] = count_delta;
+                queue_data.positions_rad[i] = position_rad;
+                queue_data.positions_mm[i] = distance_mm;
+                queue_data.velocities_ms[i] = velocity_ms;
+                queue_data.angular_velocities_rads[i] = angular_velocity_rads;
                 queue_data.velocities_filtered_ms[i] = _velocity_filters[i];
                 queue_data.encoder_errors[i] = 0; // TODO: Add error detection
             }
@@ -226,11 +235,8 @@ void EncoderTask::taskLoop() {
             // Update atomic data
             updateAtomicData(queue_data);
             
-            // Publish encoder data to serial at publish frequency
-            if ((int32_t)(xTaskGetTickCount() - last_pub_time) >= 0) {
-                last_pub_time += pub_period;
-                publishEncoderJSON(queue_data);
-            }
+            // Publish encoder JSON data to serial
+            publishEncoderJSON(queue_data);
         }
         
         // Update internal state
@@ -249,23 +255,8 @@ void EncoderTask::taskLoop() {
 }
 
 void EncoderTask::updateCalculations() {
-    uint64_t current_time_us = getCurrentTimestampUs();
-    float dt_ms = (current_time_us - _last_update_us) / 1000.0f;
-    
-    if (dt_ms <= 0) return; // Avoid division by zero
-    
-    for (int i = 0; i < 4; i++) {
-        // Calculate position in radians
-        float distance_mm = _encoder_counts[i] * MM_PER_PULSE;
-        float position_rad = distance_mm / WHEEL_RADIUS_MM;
-        
-        // Calculate velocity
-        int32_t count_delta = _encoder_counts[i] - _last_counts[i];
-        float velocity_ms = calculateFilteredVelocity(count_delta, dt_ms, _velocity_filters[i]);
-        
-        // Store in atomic data (will be copied to atomic structure in updateAtomicData)
-        // Note: We don't update atomic data here to avoid frequent critical sections
-    }
+    // Calculations are now done directly in the publishing loop
+    // This method is kept for potential future use
 }
 
 void EncoderTask::updateAtomicData(const EncoderQueueData& queue_data) {
