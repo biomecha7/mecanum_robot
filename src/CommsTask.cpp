@@ -23,6 +23,10 @@ void CommsTask::subscribeToIMUTask(IMUTask& imu_task) {
   _imu_task = &imu_task;
 }
 
+void CommsTask::subscribeToSupervisor(ISetpointProvider& supervisor) {
+  _supervisor = &supervisor;
+}
+
 bool CommsTask::start() {
   if (_task != nullptr) {
     return false; // Already started
@@ -59,6 +63,7 @@ void CommsTask::taskLoop() {
   
   EncoderQueueData encoder_data;
   IMUData imu_data;
+  uint32_t last_status_publish = 0;
   
   for (;;) {
     // Non-blocking read from EncoderTask queue
@@ -118,6 +123,23 @@ void CommsTask::taskLoop() {
         serializeJson(doc, Serial);
         Serial.println();
       }
+    }
+    
+    // Publish status at ~10 Hz
+    uint32_t current_time = millis();
+    if (_supervisor != nullptr && (current_time - last_status_publish >= 100)) {
+      last_status_publish = current_time;
+      
+      // Create JSON document for status data
+      StaticJsonDocument<256> doc;
+      doc["type"] = "status";
+      doc["t_ms"] = current_time;
+      doc["state"] = _supervisor->stateName();
+      doc["cmd_age_ms"] = 0; // TODO: implement command age tracking
+      doc["overruns"] = 0;   // TODO: implement overrun tracking
+      
+      serializeJson(doc, Serial);
+      Serial.println();
     }
     
     vTaskDelayUntil(&last, period);
