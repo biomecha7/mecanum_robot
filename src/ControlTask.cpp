@@ -1,8 +1,8 @@
 #include "ControlTask.h"
 #include <Arduino.h>
 
-ControlTask::ControlTask(MotionController& mc, IMUTask& imu, ISetpointProvider& provider)
-  : _mc(mc), _imu(imu), _provider(provider) {
+ControlTask::ControlTask(MotionController& mc, PS2Controller& ps2, IMUTask& imu, ISetpointProvider& provider)
+  : _mc(mc), _ps2(ps2), _imu(imu), _provider(provider) {
 }
 
 bool ControlTask::initialize() {
