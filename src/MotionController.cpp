@@ -19,28 +19,22 @@ static constexpr float MAX_VY_MPS  = 0.80f;   // was 0.40
 static constexpr float MAX_WZ_RAD  = 2.50f;   // was 1.50
 
 
-MotionController::MotionController() 
-    : m_frontLeft(nullptr), m_frontRight(nullptr), m_rearLeft(nullptr), m_rearRight(nullptr),
-      m_encoderFL(nullptr), m_encoderFR(nullptr), m_encoderRL(nullptr), m_encoderRR(nullptr),
+MotionController::MotionController(EncoderTask& encoder_task) 
+    : _encoder_task(encoder_task),
+      m_frontLeft(nullptr), m_frontRight(nullptr), m_rearLeft(nullptr), m_rearRight(nullptr),
       _control_mode(ControlMode::OPEN_LOOP), _pid_enabled(false),
       m_targetHeading(0.0f) {
     
-    // Initialize encoder counts
+    // Initialize target velocities
     for (int i = 0; i < 4; i++) {
-        m_encoderCounts[i] = 0;
-        m_lastEncoderCounts[i] = 0;
         m_targetVelocities[i] = 0.0f;
+        m_wheelVelFilt[i] = 0.0f;
     }
     
     // Initialize robot state
     _state = {};
     _state.last_update_ms = 0;
     _state.last_encoder_read_ms = 0;
-
-    for (int i = 0; i < 4; ++i) {
-        m_wheelVelFilt[i] = 0.0f;
-    }
-
 }
 
 MotionController::~MotionController() {
@@ -49,12 +43,6 @@ MotionController::~MotionController() {
     if (m_frontRight) delete m_frontRight;
     if (m_rearLeft) delete m_rearLeft;
     if (m_rearRight) delete m_rearRight;
-    
-    // Clean up encoders
-    if (m_encoderFL) delete m_encoderFL;
-    if (m_encoderFR) delete m_encoderFR;
-    if (m_encoderRL) delete m_encoderRL;
-    if (m_encoderRR) delete m_encoderRR;
     
     // Clean up PID controllers
     for (int i = 0; i < 4; i++) {
@@ -70,18 +58,6 @@ void MotionController::initialize() {
     m_rearLeft = new MotorDriver(CH_M3_R, CH_M3_L, M3_RPWM, M3_LPWM, PWM_FREQ, PWM_RES);
     m_rearRight = new MotorDriver(CH_M4_R, CH_M4_L, M4_RPWM, M4_LPWM, PWM_FREQ, PWM_RES);
     
-    // Create encoder instances
-    m_encoderFL = new EncoderDriver(ENC_M1_A, ENC_M1_B, &m_encoderCounts[0]);
-    m_encoderFR = new EncoderDriver(ENC_M2_A, ENC_M2_B, &m_encoderCounts[1]);
-    m_encoderRL = new EncoderDriver(ENC_M3_A, ENC_M3_B, &m_encoderCounts[2]);
-    m_encoderRR = new EncoderDriver(ENC_M4_A, ENC_M4_B, &m_encoderCounts[3]);
-    
-    // Initialize encoders
-    m_encoderFL->begin();
-    m_encoderFR->begin();
-    m_encoderRL->begin();
-    m_encoderRR->begin();
-    
     // Create PID controllers
     PIDConfig velocityConfig = PIDController::getWheelVelocityConfig();
     for (int i = 0; i < 4; i++) {
@@ -94,6 +70,8 @@ void MotionController::initialize() {
     // Initialize state
     _state.last_update_ms = millis();
     _state.last_encoder_read_ms = millis();
+    
+    Serial.println("✅ MotionController initialized (using EncoderTask for sensor data)");
 }
 
 void MotionController::setControlMode(ControlMode mode) {
@@ -210,13 +188,23 @@ void MotionController::_updateWheelVelocities() {
     uint32_t time_delta = current_time - _state.last_encoder_read_ms;
     
     if (time_delta > 0) {
-        for (int i = 0; i < 4; i++) {
-            int32_t encoder_delta = m_encoderCounts[i] - m_lastEncoderCounts[i];
-            _state.wheel_velocities[i] = _calculateWheelVelocity(encoder_delta, time_delta);
+        // Get encoder data from EncoderTask (atomic read)
+        EncoderAtomicData encoder_data;
+        if (_encoder_task.getAtomicData(encoder_data)) {
+            // Copy velocities and apply additional filtering for PID
             const float alpha = 0.25f; // 0..1  (0.2-0.4 works well)
-            m_wheelVelFilt[i] = alpha * _state.wheel_velocities[i] + (1.0f - alpha) * m_wheelVelFilt[i];
-            m_lastEncoderCounts[i] = m_encoderCounts[i];
+            for (int i = 0; i < 4; i++) {
+                _state.wheel_velocities[i] = encoder_data.velocities_ms[i];
+                m_wheelVelFilt[i] = alpha * _state.wheel_velocities[i] + (1.0f - alpha) * m_wheelVelFilt[i];
+            }
+        } else {
+            // EncoderTask data not available, set velocities to zero
+            for (int i = 0; i < 4; i++) {
+                _state.wheel_velocities[i] = 0.0f;
+                m_wheelVelFilt[i] = 0.0f;
+            }
         }
+        
         _state.last_encoder_read_ms = current_time;
     }
 }
@@ -226,6 +214,15 @@ void MotionController::_updateRobotPose() {
     float dt = (current_time - _state.last_update_ms) / 1000.0f;
     
     if (dt > 0) {
+        // Get encoder data from EncoderTask (atomic read)
+        EncoderAtomicData encoder_data;
+        if (_encoder_task.getAtomicData(encoder_data)) {
+            // Update wheel positions from encoder data
+            for (int i = 0; i < 4; i++) {
+                _state.wheel_positions[i] = encoder_data.positions_rad[i];
+            }
+        }
+        
         // Update position based on wheel velocities
         float avg_vx = (_state.wheel_velocities[0] + _state.wheel_velocities[1] + 
                        _state.wheel_velocities[2] + _state.wheel_velocities[3]) / 4.0f;
@@ -292,14 +289,6 @@ void MotionController::_clampWheelVelocities(float& fl, float& fr, float& rl, fl
     rr = std::max(-1.0f, std::min(1.0f, rr));
 }
 
-float MotionController::_calculateWheelVelocity(int32_t encoder_delta, uint32_t time_delta_ms) {
-    if (time_delta_ms == 0) return 0.0f;
-    
-    float distance_mm = encoder_delta * MM_PER_PULSE;
-    float velocity_mm_per_s = (distance_mm * 1000.0f) / time_delta_ms;
-    return velocity_mm_per_s / 1000.0f; // Convert to m/s
-}
-
 void MotionController::_mecanumKinematics(float forward_cmd, float strafe_cmd, float rotate_cmd, float* wheel_vels) {
     // Map joystick [-1,1] to physical body velocities
     const float vx = forward_cmd * MAX_VX_MPS;   // m/s
@@ -327,8 +316,12 @@ void MotionController::printDebugInfo() {
     Serial.printf("Wheel Velocities: [%.3f, %.3f, %.3f, %.3f] m/s\n", 
                   _state.wheel_velocities[0], _state.wheel_velocities[1],
                   _state.wheel_velocities[2], _state.wheel_velocities[3]);
+    
+    // Get encoder counts from EncoderTask
+    int32_t encoder_counts[4];
+    getEncoderCounts(encoder_counts);
     Serial.printf("Encoder Counts: [%ld, %ld, %ld, %ld]\n",
-                  m_encoderCounts[0], m_encoderCounts[1], m_encoderCounts[2], m_encoderCounts[3]);
+                  encoder_counts[0], encoder_counts[1], encoder_counts[2], encoder_counts[3]);
 }
 
 void MotionController::printPIDStatus() {
@@ -344,5 +337,37 @@ void MotionController::printPIDStatus() {
         Serial.printf("Orientation PID: Error=%.3f, Integral=%.3f, Derivative=%.3f\n",
                      m_orientationPID->getLastError(), m_orientationPID->getIntegral(), 
                      m_orientationPID->getDerivative());
+    }
+}
+
+void MotionController::getEncoderCounts(int32_t counts[4]) const {
+    EncoderAtomicData encoder_data;
+    if (_encoder_task.getAtomicData(encoder_data)) {
+        for (int i = 0; i < 4; i++) {
+            counts[i] = encoder_data.counts[i];
+        }
+    } else {
+        for (int i = 0; i < 4; i++) {
+            counts[i] = 0;
+        }
+    }
+}
+
+void MotionController::getWheelPositions(float positions[4]) const {
+    EncoderAtomicData encoder_data;
+    if (_encoder_task.getAtomicData(encoder_data)) {
+        for (int i = 0; i < 4; i++) {
+            positions[i] = encoder_data.positions_rad[i];
+        }
+    } else {
+        for (int i = 0; i < 4; i++) {
+            positions[i] = 0.0f;
+        }
+    }
+}
+
+void MotionController::getWheelVelocities(float velocities[4]) const {
+    for (int i = 0; i < 4; i++) {
+        velocities[i] = _state.wheel_velocities[i];
     }
 }
