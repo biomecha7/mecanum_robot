@@ -12,8 +12,9 @@
 enum class SupervisorState { 
   IDLE,           // Robot is idle, no commands
   MANUAL_PS2,     // Manual control via PS2 controller
+  TELEOP_PI,      // Teleop control via Pi commands
   ESTOP           // Emergency stop (latched until cleared)
-  // Future states: TELEOP_PI, AUTO_PI
+  // Future states: AUTO_PI
 };
 
 /**
@@ -64,6 +65,27 @@ public:
    * @return String describing the current state
    */
   const char* stateName() const override;
+  
+  /**
+   * @brief Feed Pi command to supervisor
+   * @param vx Forward velocity (m/s)
+   * @param vy Sideways velocity (m/s)
+   * @param wz Angular velocity (rad/s)
+   * @param t_ms Timestamp in milliseconds
+   */
+  void feedPiCmd(float vx, float vy, float wz, uint32_t t_ms);
+  
+  /**
+   * @brief Request mode change
+   * @param mode Mode name ("TELEOP_PI", "MANUAL_PS2", etc.)
+   */
+  void requestMode(const char* mode);
+  
+  /**
+   * @brief Get command age in milliseconds
+   * @return Age of last Pi command in ms
+   */
+  uint32_t getCmdAgeMs() const;
 
 private:
   static void taskTrampoline(void* arg);
@@ -77,6 +99,16 @@ private:
   
   // Command data (atomic access)
   mutable BodyCmd _cmd{}; // Current command
+  
+  // Pi command data
+  struct PiCmd {
+    float vx, vy, wz;
+    uint32_t t_ms;
+    uint32_t last_received_ms;
+  } _pi_cmd{};
+  
+  // Command freshness timeout (ms)
+  static const uint32_t PI_CMD_TIMEOUT_MS = 200;
   
   // Task configuration
   static const int SUPERVISOR_HZ = 50;

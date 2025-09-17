@@ -49,54 +49,38 @@ void ControlTask::taskLoop() {
   TickType_t last = xTaskGetTickCount();
 
   for (;;) {
-    // Update controller and check if we have valid data
-    if (!_ps2.update()) {
-      if (_ps2.isEmergencyStop()) {
-        _mc.stop();
-        vTaskDelay(pdMS_TO_TICKS(100));
-        vTaskDelayUntil(&last, period);
-        continue;
+    // Update PS2 controller for button handling only
+    bool ps2_healthy = _ps2.update();
+    
+    // Handle control mode toggles (only if PS2 is healthy)
+    if (ps2_healthy) {
+      static bool lastStartButton = false;
+      static bool lastR2Button = false;
+
+      bool startButton = _ps2.getButton(PSXBTN_START);
+      bool r2Button    = _ps2.getButton(PSXBTN_R2);
+
+      if (startButton && !lastStartButton) {
+        _closedLoopEnabled = !_closedLoopEnabled;
+        _mc.enablePIDControl(_closedLoopEnabled);
+        if (_closedLoopEnabled) {
+          _mc.setControlMode(ControlMode::VELOCITY_PID);
+          // turn on LED to indicate closed-loop mode
+          digitalWrite(LED_PIN_YLW, true);
+        } else {
+          _mc.setControlMode(ControlMode::OPEN_LOOP);
+          // turn off LED to indicate open-loop mode
+          digitalWrite(LED_PIN_YLW, false);
+        }
       }
-      vTaskDelay(pdMS_TO_TICKS(10));   // short yield if no controller
-      vTaskDelayUntil(&last, period);
-      continue;
-    }
 
-    // Emergency stop
-    if (_ps2.isEmergencyStop()) {
-      _mc.stop();
-      vTaskDelay(pdMS_TO_TICKS(100));
-      vTaskDelayUntil(&last, period);
-      continue;
-    }
-
-    // Handle control mode toggles
-    static bool lastStartButton = false;
-    static bool lastR2Button = false;
-
-    bool startButton = _ps2.getButton(PSXBTN_START);
-    bool r2Button    = _ps2.getButton(PSXBTN_R2);
-
-    if (startButton && !lastStartButton) {
-      _closedLoopEnabled = !_closedLoopEnabled;
-      _mc.enablePIDControl(_closedLoopEnabled);
-      if (_closedLoopEnabled) {
-        _mc.setControlMode(ControlMode::VELOCITY_PID);
-        // turn on LED to indicate closed-loop mode
-        digitalWrite(LED_PIN_YLW, true);
-      } else {
-        _mc.setControlMode(ControlMode::OPEN_LOOP);
-        // turn off LED to indicate open-loop mode
-        digitalWrite(LED_PIN_YLW, false);
+      if (r2Button && !lastR2Button) {
+        _debugMode = !_debugMode;
       }
-    }
 
-    if (r2Button && !lastR2Button) {
-      _debugMode = !_debugMode;
+      lastStartButton = startButton;
+      lastR2Button = r2Button;
     }
-
-    lastStartButton = startButton;
-    lastR2Button = r2Button;
 
     // Update sensors at ~100 Hz
     uint32_t currentTime = millis();
@@ -105,7 +89,7 @@ void ControlTask::taskLoop() {
       _lastSensorUpdate = currentTime;
     }
 
-    // Get setpoint from provider
+    // Get setpoint from provider (authoritative source)
     BodyCmd sp = _provider.latest();
     
     // Drive with setpoint from provider

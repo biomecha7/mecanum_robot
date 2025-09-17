@@ -55,11 +55,39 @@ const char* Supervisor::stateName() const {
       return "IDLE";
     case SupervisorState::MANUAL_PS2:
       return "MANUAL_PS2";
+    case SupervisorState::TELEOP_PI:
+      return "TELEOP_PI";
     case SupervisorState::ESTOP:
       return "ESTOP";
     default:
       return "UNKNOWN";
   }
+}
+
+void Supervisor::feedPiCmd(float vx, float vy, float wz, uint32_t t_ms) {
+  _pi_cmd.vx = vx;
+  _pi_cmd.vy = vy;
+  _pi_cmd.wz = wz;
+  _pi_cmd.t_ms = t_ms;
+  _pi_cmd.last_received_ms = millis();
+}
+
+void Supervisor::requestMode(const char* mode) {
+  if (strcmp(mode, "TELEOP_PI") == 0) {
+    // Request teleop mode - will be granted if Pi command is fresh
+    // State machine will handle the transition
+  } else if (strcmp(mode, "MANUAL_PS2") == 0) {
+    // Request manual mode - will be granted if PS2 is healthy
+    // State machine will handle the transition
+  }
+}
+
+uint32_t Supervisor::getCmdAgeMs() const {
+  uint32_t current_time = millis();
+  if (_pi_cmd.last_received_ms == 0) {
+    return UINT32_MAX; // No command received yet
+  }
+  return current_time - _pi_cmd.last_received_ms;
 }
 
 void Supervisor::taskTrampoline(void* arg) {
@@ -86,6 +114,10 @@ void Supervisor::taskLoop() {
         if (ps2_healthy) {
           _state = SupervisorState::MANUAL_PS2;
         }
+        // Check for fresh Pi command
+        else if (getCmdAgeMs() <= PI_CMD_TIMEOUT_MS) {
+          _state = SupervisorState::TELEOP_PI;
+        }
         // Set zero command
         _cmd.vx = 0.0f;
         _cmd.vy = 0.0f;
@@ -110,6 +142,32 @@ void Supervisor::taskLoop() {
         _cmd.vx = _ps2.getVx() * _ps2.getSpeedScale();
         _cmd.vy = _ps2.getVy() * _ps2.getSpeedScale();
         _cmd.wz = _ps2.getWz() * _ps2.getSpeedScale();
+        _cmd.t_ms = current_time;
+        break;
+        
+      case SupervisorState::TELEOP_PI:
+        // Check for emergency stop
+        if (_ps2.isEmergencyStop()) {
+          _state = SupervisorState::ESTOP;
+          break;
+        }
+        
+        // Check for PS2 connection (higher priority)
+        if (ps2_healthy) {
+          _state = SupervisorState::MANUAL_PS2;
+          break;
+        }
+        
+        // Check for Pi command freshness
+        if (getCmdAgeMs() > PI_CMD_TIMEOUT_MS) {
+          _state = SupervisorState::IDLE;
+          break;
+        }
+        
+        // Use Pi command
+        _cmd.vx = _pi_cmd.vx;
+        _cmd.vy = _pi_cmd.vy;
+        _cmd.wz = _pi_cmd.wz;
         _cmd.t_ms = current_time;
         break;
         

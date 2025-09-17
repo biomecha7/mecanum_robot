@@ -1,4 +1,5 @@
 #include "CommsTask.h"
+#include "Supervisor.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
 
@@ -25,6 +26,24 @@ void CommsTask::subscribeToIMUTask(IMUTask& imu_task) {
 
 void CommsTask::subscribeToSupervisor(ISetpointProvider& supervisor) {
   _supervisor = &supervisor;
+}
+
+void CommsTask::feedPiCmd(float vx, float vy, float wz, uint32_t t_ms) {
+  // Forward Pi command to supervisor
+  if (_supervisor != nullptr) {
+    // Cast to Supervisor to access feedPiCmd method
+    Supervisor* supervisor = static_cast<Supervisor*>(_supervisor);
+    supervisor->feedPiCmd(vx, vy, wz, t_ms);
+  }
+}
+
+void CommsTask::requestMode(const char* mode) {
+  // Forward mode request to supervisor
+  if (_supervisor != nullptr) {
+    // Cast to Supervisor to access requestMode method
+    Supervisor* supervisor = static_cast<Supervisor*>(_supervisor);
+    supervisor->requestMode(mode);
+  }
 }
 
 bool CommsTask::start() {
@@ -65,7 +84,42 @@ void CommsTask::taskLoop() {
   IMUData imu_data;
   uint32_t last_status_publish = 0;
   
+  // RX buffer for JSON commands
+  String rx_buffer = "";
+  
   for (;;) {
+    // Handle incoming JSON commands from Pi
+    while (Serial.available()) {
+      char c = Serial.read();
+      if (c == '\n' || c == '\r') {
+        if (rx_buffer.length() > 0) {
+          // Parse JSON command
+          StaticJsonDocument<256> doc;
+          DeserializationError error = deserializeJson(doc, rx_buffer);
+          
+          if (!error) {
+            const char* type = doc["type"];
+            if (strcmp(type, "cmd_vel") == 0) {
+              float vx = doc["vx"];
+              float vy = doc["vy"];
+              float wz = doc["wz"];
+              uint32_t t_ms = doc["t_ms"];
+              feedPiCmd(vx, vy, wz, t_ms);
+            } else if (strcmp(type, "set_mode") == 0) {
+              const char* mode = doc["mode"];
+              requestMode(mode);
+            }
+          }
+          rx_buffer = "";
+        }
+      } else {
+        rx_buffer += c;
+        // Prevent buffer overflow
+        if (rx_buffer.length() > 512) {
+          rx_buffer = "";
+        }
+      }
+    }
     // Non-blocking read from EncoderTask queue
     if (_encoder_task != nullptr) {
       if (_encoder_task->getQueueData(encoder_data, 0)) {
@@ -135,7 +189,16 @@ void CommsTask::taskLoop() {
       doc["type"] = "status";
       doc["t_ms"] = current_time;
       doc["state"] = _supervisor->stateName();
-      doc["cmd_age_ms"] = 0; // TODO: implement command age tracking
+      
+      // Get command age from supervisor
+      Supervisor* supervisor = static_cast<Supervisor*>(_supervisor);
+      uint32_t cmd_age = supervisor->getCmdAgeMs();
+      if (cmd_age == UINT32_MAX) {
+        doc["cmd_age_ms"] = 0; // No command received
+      } else {
+        doc["cmd_age_ms"] = cmd_age;
+      }
+      
       doc["overruns"] = 0;   // TODO: implement overrun tracking
       
       serializeJson(doc, Serial);

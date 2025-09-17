@@ -26,6 +26,10 @@ public:
   void subscribeToEncoderTask(EncoderTask& encoder_task);
   void subscribeToIMUTask(IMUTask& imu_task);
   void subscribeToSupervisor(ISetpointProvider& supervisor);
+  
+  // Teleop command interface
+  void feedPiCmd(float vx, float vy, float wz, uint32_t t_ms);
+  void requestMode(const char* mode);
 
 private:
   static void taskTrampoline(void* arg);
