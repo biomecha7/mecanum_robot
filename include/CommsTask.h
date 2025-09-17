@@ -1,6 +1,7 @@
 #pragma once
 #include "EncoderTask.h"
 #include "IMUTask.h"
+#include "ISetpointProvider.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -24,6 +25,7 @@ public:
   // Subscribe to existing task queues
   void subscribeToEncoderTask(EncoderTask& encoder_task);
   void subscribeToIMUTask(IMUTask& imu_task);
+  void subscribeToSupervisor(ISetpointProvider& supervisor);
 
 private:
   static void taskTrampoline(void* arg);
@@ -32,6 +34,7 @@ private:
   // References to subscribed tasks
   EncoderTask* _encoder_task{nullptr};
   IMUTask* _imu_task{nullptr};
+  ISetpointProvider* _supervisor{nullptr};
   
   TaskHandle_t _task{nullptr};
   

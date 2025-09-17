@@ -2,12 +2,13 @@
 #include "MotionController.h"
 #include "PS2Controller.h"
 #include "IMUTask.h"
+#include "ISetpointProvider.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 class ControlTask {
 public:
-  ControlTask(MotionController& mc, PS2Controller& ps2, IMUTask& imu);
+  ControlTask(MotionController& mc, PS2Controller& ps2, IMUTask& imu, ISetpointProvider& provider);
   bool initialize();   // any LEDs, preflight checks
   bool start();        // xTaskCreatePinnedToCore(...) + trampoline
   void stop();
@@ -19,6 +20,7 @@ private:
   MotionController& _mc;
   PS2Controller&    _ps2;
   IMUTask&          _imu;
+  ISetpointProvider& _provider;
   TaskHandle_t      _task{nullptr};
   
   // Control state (moved from globals)

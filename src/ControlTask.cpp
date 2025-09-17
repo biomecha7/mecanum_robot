@@ -1,8 +1,8 @@
 #include "ControlTask.h"
 #include <Arduino.h>
 
-ControlTask::ControlTask(MotionController& mc, PS2Controller& ps2, IMUTask& imu)
-  : _mc(mc), _ps2(ps2), _imu(imu) {
+ControlTask::ControlTask(MotionController& mc, PS2Controller& ps2, IMUTask& imu, ISetpointProvider& provider)
+  : _mc(mc), _ps2(ps2), _imu(imu), _provider(provider) {
 }
 
 bool ControlTask::initialize() {
@@ -105,13 +105,11 @@ void ControlTask::taskLoop() {
       _lastSensorUpdate = currentTime;
     }
 
-    // Drive
-    float vx = _ps2.getVx();
-    float vy = _ps2.getVy();
-    float wz = _ps2.getWz();
-    float speed_scale = _ps2.getSpeedScale();
-
-    _mc.drive(vx * speed_scale, vy * speed_scale, wz * speed_scale);
+    // Get setpoint from provider
+    BodyCmd sp = _provider.latest();
+    
+    // Drive with setpoint from provider
+    _mc.drive(sp.vx, sp.vy, sp.wz);
 
     // Status / debug (unchanged timing)
     if (currentTime - _lastDebugPrint >= 500) {
@@ -121,6 +119,7 @@ void ControlTask::taskLoop() {
       }
       
       // Status information available for subscribers
+      // Note: Provider state is published separately by Supervisor
       
       _lastDebugPrint = currentTime;
     }

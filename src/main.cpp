@@ -6,6 +6,7 @@
 #include "IMUTask.h"
 #include "ControlTask.h"
 #include "CommsTask.h"
+#include "Supervisor.h"
 #include <ArduinoJson.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,7 +21,8 @@ EncoderTask encoderTask;
 MotionController motionController(encoderTask);
 PS2Controller ps2Controller;
 IMUTask imuTask(IMU_SDA, IMU_SCL);
-ControlTask controlTask(motionController, ps2Controller, imuTask);
+Supervisor supervisor(ps2Controller);
+ControlTask controlTask(motionController, ps2Controller, imuTask, supervisor);
 CommsTask commsTask;
 
 // ---- Setup ----
@@ -75,6 +77,21 @@ void setup() {
   
   // Initialize PS2 controller
   ps2Controller.initialize();
+  
+  // Initialize Supervisor (state machine)
+  Serial.println("Initializing Supervisor...");
+  if (!supervisor.initialize()) {
+    Serial.println("❌ Supervisor initialization failed");
+    return;
+  } else if (!supervisor.start()) {
+    Serial.println("❌ Supervisor start failed");
+    return;
+  } else {
+    Serial.println("✅ Supervisor started successfully");
+  }
+  
+  // Subscribe CommsTask to Supervisor
+  commsTask.subscribeToSupervisor(supervisor);
   
   // Initialize IMU task
   Serial.println("Initializing IMU task...");
