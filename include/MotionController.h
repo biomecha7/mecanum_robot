@@ -1,6 +1,6 @@
 #pragma once
 #include "MotorDriver.h"
-#include "EncoderDriver.h"
+#include "EncoderTask.h"
 #include "PIDController.h"
 #include "RobotPins.h"
 
@@ -50,7 +50,11 @@ struct RobotState {
 
 class MotionController {
 public:
-    MotionController();
+    /**
+     * @brief Construct a new MotionController object
+     * @param encoder_task Reference to the EncoderTask for sensor data
+     */
+    MotionController(EncoderTask& encoder_task);
     ~MotionController();
     
     // Initialize the motion controller with PWM setup
@@ -81,22 +85,24 @@ public:
     float getWheelDiameterMm() const { return WHEEL_DIAMETER_MM; }
     float getDeadband() const { return DEADBAND; }
     
+    // Encoder access for sensor publishing
+    void getEncoderCounts(int32_t counts[4]) const;
+    void getWheelPositions(float positions[4]) const;
+    void getWheelVelocities(float velocities[4]) const;
+    
     // Debug and tuning
     void printDebugInfo();
     void printPIDStatus();
 
 private:
+    // Reference to encoder task for sensor data
+    EncoderTask& _encoder_task;
+    
     // Motor driver instances
     MotorDriver* m_frontLeft;
     MotorDriver* m_frontRight;
     MotorDriver* m_rearLeft;
     MotorDriver* m_rearRight;
-    
-    // Sensor instances
-    EncoderDriver* m_encoderFL;
-    EncoderDriver* m_encoderFR;
-    EncoderDriver* m_encoderRL;
-    EncoderDriver* m_encoderRR;
     
     // Filtered wheel velocity (EMA) used by the velocity PID
     float m_wheelVelFilt[4];
@@ -111,10 +117,6 @@ private:
     
     // Robot state
     RobotState _state;
-    
-    // Encoder state
-    volatile int32_t m_encoderCounts[4];
-    int32_t m_lastEncoderCounts[4];
     
     // Target values for closed-loop control
     float m_targetVelocities[4];  // Target wheel velocities
@@ -138,7 +140,6 @@ private:
     void _applyVelocityControl();
     void _applyOrientationControl();
     void _clampWheelVelocities(float& fl, float& fr, float& rl, float& rr);
-    float _calculateWheelVelocity(int32_t encoder_delta, uint32_t time_delta_ms);
     void _mecanumKinematics(float vx, float vy, float wz, float* wheel_vels);
     void _mecanumInverseKinematics(float fl, float fr, float rl, float rr, float* vx, float* vy, float* wz);
 };

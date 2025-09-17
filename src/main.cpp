@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include "EncoderTask.h"
 #include "MotionController.h"
 #include "PS2Controller.h"
 #include "IMUTask.h"
@@ -8,7 +9,8 @@
 #include "freertos/task.h"
 
 // ---- Globals ----
-MotionController motionController;
+EncoderTask encoderTask;
+MotionController motionController(encoderTask);
 PS2Controller ps2Controller;
 IMUTask imuTask(IMU_SDA, IMU_SCL);
 
@@ -129,28 +131,6 @@ void ControlTask(void*) {
   }
 }
 
-static const int HEARTBEAT_HZ = 1;  
-
-// 1 Hz heartbeat task
-void HeartbeatTask(void*) {
-  pinMode(LED_PIN_RED, OUTPUT);
-  const TickType_t period = pdMS_TO_TICKS(1000 / HEARTBEAT_HZ); // 1000ms toggle
-  TickType_t last = xTaskGetTickCount();
-
-  for (;;) {
-    // toggle LED
-    digitalWrite(LED_PIN_RED, !digitalRead(LED_PIN_RED));
-
-    // JSON heartbeat
-    StaticJsonDocument<64> doc;
-    doc["heartbeat"] = millis();  // Send current uptime in ms
-    serializeJson(doc, Serial);
-    Serial.println(); // newline delimiter
-
-    vTaskDelayUntil(&last, period);
-  }
-}
-
 // ---- Setup ----
 void setup() {
   Serial.begin(115200);
@@ -168,6 +148,18 @@ void setup() {
   Serial.println("  START: Toggle Closed-Loop Control");
   Serial.println("  R2: Toggle Debug Mode");
   Serial.println("========================================");
+
+  // Initialize encoder task FIRST (MotionController depends on it)
+  Serial.println("Initializing encoder task...");
+  if (!encoderTask.initialize()) {
+    Serial.println("❌ Encoder task initialization failed");
+    return; // Cannot continue without encoders
+  } else if (!encoderTask.start()) {
+    Serial.println("❌ Encoder task start failed");
+    return; // Cannot continue without encoders
+  } else {
+    Serial.println("✅ Encoder task started successfully");
+  }
 
   // Initialize motion controller (handles PWM setup internally)
   Serial.println("Initializing motion controller...");
@@ -196,9 +188,6 @@ void setup() {
   Serial.println("Setup complete. Ready to drive!");
   Serial.println("Press START to enable closed-loop control");
   
-  // Start heartbeat task
-  xTaskCreatePinnedToCore(HeartbeatTask, "HeartbeatTask", 8192, nullptr, 1, nullptr, 0); // priority 1 on core 0
-
   // Start control task
   xTaskCreatePinnedToCore(ControlTask, "ControlTask", 8192, nullptr, 4, nullptr, 1); // priority 4 on core 1
 }
