@@ -39,8 +39,10 @@ bool PS2Controller::update() {
             if (m_controller_connected) {
                 Serial.println("Controller disconnected!");
                 m_controller_connected = false;
+                // Only set emergency stop if controller was previously connected
+                // This prevents auto-ESTOP when controller is physically disconnected
+                m_emergency_stop = true;
             }
-            m_emergency_stop = true;
             return false;
         }
     }
