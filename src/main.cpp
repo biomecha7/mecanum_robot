@@ -22,7 +22,7 @@ MotionController motionController(encoderTask);
 PS2Controller ps2Controller;
 IMUTask imuTask(IMU_SDA, IMU_SCL);
 Supervisor supervisor(ps2Controller);
-ControlTask controlTask(motionController, ps2Controller, imuTask, supervisor);
+ControlTask controlTask(motionController, imuTask, supervisor);
 CommsTask commsTask;
 
 // ---- Setup ----
