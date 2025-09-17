@@ -37,6 +37,7 @@ public:
     bool getButton(uint16_t button) const { return (m_last_buttons & button) != 0; }
     bool getButtonPressed(uint16_t button) const;
     bool getButtonReleased(uint16_t button) const;
+    uint16_t getAllButtons() const { return m_last_buttons; }  // For debugging
     
 private:
     // PS2 controller instance

@@ -52,6 +52,17 @@ void ControlTask::taskLoop() {
     // Update PS2 controller for button handling only
     bool ps2_healthy = _ps2.update();
     
+    // Debug PS2 status every 2 seconds
+    static uint32_t last_ps2_debug = 0;
+    uint32_t now = millis();
+    if (now - last_ps2_debug >= 2000) {
+      Serial.printf("🔧 PS2 Debug: Connected=%s, VX=%.3f, VY=%.3f, WZ=%.3f, Estop=%s\n",
+                    ps2_healthy ? "YES" : "NO",
+                    _ps2.getVx(), _ps2.getVy(), _ps2.getWz(),
+                    _ps2.isEmergencyStop() ? "YES" : "NO");
+      last_ps2_debug = now;
+    }
+    
     // Handle control mode toggles (only if PS2 is healthy)
     if (ps2_healthy) {
       static bool lastStartButton = false;

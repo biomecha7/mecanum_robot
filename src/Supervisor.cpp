@@ -95,6 +95,16 @@ void Supervisor::taskTrampoline(void* arg) {
   instance->taskLoop();
 }
 
+const char* Supervisor::stateNameFromEnum(SupervisorState state) {
+  switch (state) {
+    case SupervisorState::IDLE: return "IDLE";
+    case SupervisorState::MANUAL_PS2: return "MANUAL_PS2";
+    case SupervisorState::TELEOP_PI: return "TELEOP_PI";
+    case SupervisorState::ESTOP: return "ESTOP";
+    default: return "UNKNOWN";
+  }
+}
+
 void Supervisor::taskLoop() {
   const TickType_t period = pdMS_TO_TICKS(1000 / SUPERVISOR_HZ);
   TickType_t last = xTaskGetTickCount();
@@ -106,6 +116,14 @@ void Supervisor::taskLoop() {
     
     // Update PS2 controller
     bool ps2_healthy = _ps2.update();
+    
+    // Debug state transitions
+    static SupervisorState last_state = SupervisorState::IDLE;
+    if (_state != last_state) {
+      Serial.printf("🔄 Supervisor: %s -> %s\n", 
+                    stateNameFromEnum(last_state), stateNameFromEnum(_state));
+      last_state = _state;
+    }
     
     // State machine logic
     switch (_state) {

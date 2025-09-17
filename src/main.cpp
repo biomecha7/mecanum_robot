@@ -127,6 +127,8 @@ void setup() {
   
   Serial.println("Setup complete. Ready to drive!");
   Serial.println("Press START to enable closed-loop control");
+  Serial.println("\n🔧 PS2 DEBUG MODE ENABLED");
+  Serial.println("Watch for PS2 status messages...");
 }
 
 void loop() {

@@ -90,6 +90,7 @@ public:
 private:
   static void taskTrampoline(void* arg);
   void taskLoop();
+  static const char* stateNameFromEnum(SupervisorState state);
   
   PS2Controller& _ps2;
   TaskHandle_t _task{nullptr};
