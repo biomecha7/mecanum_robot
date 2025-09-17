@@ -196,11 +196,17 @@ void Supervisor::taskLoop() {
         _cmd.wz = 0.0f;
         _cmd.t_ms = current_time;
         
-        // Check for PS2 disconnection to clear ESTOP
+        // Check if ESTOP has been cleared
+        if (!_ps2.isEmergencyStop()) {
+          _state = SupervisorState::IDLE;
+          break;
+        }
+        
+        // Check for PS2 disconnection to clear ESTOP (fallback)
         if (!ps2_healthy) {
           _state = SupervisorState::IDLE;
         }
-        // Note: ESTOP remains latched until PS2 is disconnected
+        // Note: ESTOP can now be cleared by SELECT+START button combination
         break;
     }
     

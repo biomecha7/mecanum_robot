@@ -4,7 +4,8 @@
 PS2Controller::PS2Controller() 
     : m_controller_connected(false), m_last_controller_read(0),
       m_vx(0.0f), m_vy(0.0f), m_wz(0.0f), m_speed_scale(SPEED_DEFAULT),
-      m_emergency_stop(false), m_last_buttons(0), m_previous_buttons(0), m_deadband(0.10f) {}
+      m_emergency_stop(false), m_last_buttons(0), m_previous_buttons(0), 
+      m_estop_clear_start(0), m_deadband(0.10f) {}
 
 void PS2Controller::initialize() {
     Serial.println("Initializing PS2 controller...");
@@ -56,22 +57,38 @@ bool PS2Controller::getButtonReleased(uint16_t button) const {
 }
 
 void PS2Controller::processButtons(const PSX::PSXDATA& js) {
-    // Emergency Stop
-    if (js.buttons & PSXBTN_SELECT) {
+    // ESTOP Clear: SELECT + START held for 2 seconds
+    if (m_emergency_stop && (js.buttons & PSXBTN_SELECT) && (js.buttons & PSXBTN_START)) {
+        if (m_estop_clear_start == 0) {
+            m_estop_clear_start = millis();
+        } else if (millis() - m_estop_clear_start > 2000) {
+            m_emergency_stop = false;
+            m_estop_clear_start = 0;
+            Serial.println("✅ ESTOP CLEARED! Press SELECT+START for 2 seconds to clear.");
+        }
+        return; // Don't process other buttons during ESTOP clear
+    } else {
+        m_estop_clear_start = 0; // Reset if buttons released
+    }
+    
+    // Emergency Stop (only if not already in ESTOP)
+    if (!m_emergency_stop && (js.buttons & PSXBTN_SELECT)) {
         m_emergency_stop = true;
-        Serial.println("🛑 EMERGENCY STOP!");
+        Serial.println("🛑 EMERGENCY STOP! Press SELECT+START for 2 seconds to clear.");
         return;
     }
     
-    // Speed Mode Control
-    if (js.buttons & PSXBTN_L1) {
-        m_speed_scale = SPEED_SLOW;  // Slow mode for precision
-    } else if (js.buttons & PSXBTN_R1) {
-        m_speed_scale = SPEED_FAST;  // Full speed mode
-    } else if (js.buttons & PSXBTN_L2) {
-        m_speed_scale = SPEED_MEDIUM;  // Medium-slow mode
-    } else {
-        m_speed_scale = SPEED_DEFAULT;  // Default mode
+    // Speed Mode Control (only if not in ESTOP)
+    if (!m_emergency_stop) {
+        if (js.buttons & PSXBTN_L1) {
+            m_speed_scale = SPEED_SLOW;  // Slow mode for precision
+        } else if (js.buttons & PSXBTN_R1) {
+            m_speed_scale = SPEED_FAST;  // Full speed mode
+        } else if (js.buttons & PSXBTN_L2) {
+            m_speed_scale = SPEED_MEDIUM;  // Medium-slow mode
+        } else {
+            m_speed_scale = SPEED_DEFAULT;  // Default mode
+        }
     }
 }
 

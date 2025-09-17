@@ -27,6 +27,9 @@ public:
     // Check for emergency stop
     bool isEmergencyStop() const { return m_emergency_stop; }
     
+    // Clear emergency stop (for ESTOP recovery)
+    void clearEmergencyStop() { m_emergency_stop = false; }
+    
     // Check connection status
     bool isConnected() const { return m_controller_connected; }
     
@@ -55,6 +58,9 @@ private:
     // Button state tracking
     uint16_t m_last_buttons;
     uint16_t m_previous_buttons;
+    
+    // ESTOP clear timing
+    uint32_t m_estop_clear_start;
     
     // Joystick mapping parameters
     float m_deadband;
