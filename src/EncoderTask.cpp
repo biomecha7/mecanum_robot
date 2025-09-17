@@ -19,6 +19,7 @@ EncoderTask::EncoderTask()
     _atomic_data.data_valid = false;
 }
 
+
 EncoderTask::~EncoderTask() {
     stop();
     
@@ -235,8 +236,7 @@ void EncoderTask::taskLoop() {
             // Update atomic data
             updateAtomicData(queue_data);
             
-            // Publish encoder JSON data to serial
-            publishEncoderJSON(queue_data);
+            // Data is available in the internal queue for subscribers
         }
         
         // Update internal state
@@ -299,70 +299,3 @@ uint64_t EncoderTask::getCurrentTimestampUs() const {
     return esp_timer_get_time(); // Microseconds since boot
 }
 
-void EncoderTask::publishEncoderJSON(const EncoderQueueData& queue_data) {
-    // Create JSON message similar to IMU format but for wheel encoders
-    StaticJsonDocument<512> msg;
-    
-    // Message type and timestamp
-    msg["type"] = "encoder";
-    msg["t_ms"] = queue_data.timestamp_us / 1000;  // Convert to ms
-    
-    // Raw encoder counts
-    auto counts = msg.createNestedArray("counts");
-    for (int i = 0; i < 4; i++) {
-        counts.add(queue_data.counts[i]);
-    }
-    
-    // Encoder count deltas (for velocity calculation verification)
-    auto deltas = msg.createNestedArray("deltas");
-    for (int i = 0; i < 4; i++) {
-        deltas.add(queue_data.count_deltas[i]);
-    }
-    
-    // Wheel positions in radians
-    auto positions = msg.createNestedArray("pos_rad");
-    for (int i = 0; i < 4; i++) {
-        positions.add(queue_data.positions_rad[i]);
-    }
-    
-    // Linear velocities in m/s
-    auto velocities = msg.createNestedArray("vel_ms");
-    for (int i = 0; i < 4; i++) {
-        velocities.add(queue_data.velocities_ms[i]);
-    }
-    
-    // Angular velocities in rad/s
-    auto angular_velocities = msg.createNestedArray("avel_rads");
-    for (int i = 0; i < 4; i++) {
-        angular_velocities.add(queue_data.angular_velocities_rads[i]);
-    }
-    
-    // Filtered velocities
-    auto filtered_velocities = msg.createNestedArray("vel_filt_ms");
-    for (int i = 0; i < 4; i++) {
-        filtered_velocities.add(queue_data.velocities_filtered_ms[i]);
-    }
-    
-    // Timing and quality information
-    msg["dt_ms"] = queue_data.dt_ms;
-    msg["freq_hz"] = queue_data.update_frequency_hz;
-    msg["update_count"] = queue_data.update_count;
-    msg["valid"] = queue_data.data_valid;
-    
-    // Wheel names for ROS2 compatibility
-    auto wheel_names = msg.createNestedArray("wheel_names");
-    wheel_names.add("front_left");
-    wheel_names.add("front_right");
-    wheel_names.add("rear_left");
-    wheel_names.add("rear_right");
-    
-    // Error flags (for future diagnostics)
-    auto errors = msg.createNestedArray("errors");
-    for (int i = 0; i < 4; i++) {
-        errors.add(queue_data.encoder_errors[i]);
-    }
-    
-    // Serialize and send
-    serializeJson(msg, Serial);
-    Serial.println();
-}

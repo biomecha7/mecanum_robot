@@ -13,6 +13,7 @@ bool ControlTask::initialize() {
   return true;
 }
 
+
 bool ControlTask::start() {
   if (_task != nullptr) {
     return false; // Already started
@@ -81,12 +82,10 @@ void ControlTask::taskLoop() {
       _mc.enablePIDControl(_closedLoopEnabled);
       if (_closedLoopEnabled) {
         _mc.setControlMode(ControlMode::VELOCITY_PID);
-        Serial.println("✅ Closed-loop control ENABLED");
         // turn on LED to indicate closed-loop mode
         digitalWrite(LED_PIN_YLW, true);
       } else {
         _mc.setControlMode(ControlMode::OPEN_LOOP);
-        Serial.println("❌ Closed-loop control DISABLED");
         // turn off LED to indicate open-loop mode
         digitalWrite(LED_PIN_YLW, false);
       }
@@ -94,7 +93,6 @@ void ControlTask::taskLoop() {
 
     if (r2Button && !lastR2Button) {
       _debugMode = !_debugMode;
-      Serial.println(_debugMode ? "🐛 Debug mode ENABLED" : "🐛 Debug mode DISABLED");
     }
 
     lastStartButton = startButton;
@@ -120,20 +118,10 @@ void ControlTask::taskLoop() {
       if (_debugMode) {
         _mc.printDebugInfo();
         if (_closedLoopEnabled) _mc.printPIDStatus();
-        
-        // Print IMU data if available
-        IMUData imu_data;
-        if (_imu.getLatestData(imu_data, 0)) {  // Non-blocking
-          Serial.printf("IMU: accel(%.2f,%.2f,%.2f) gyro(%.2f,%.2f,%.2f) temp=%.1f°C\n",
-                        imu_data.accel_x, imu_data.accel_y, imu_data.accel_z,
-                        imu_data.gyro_x, imu_data.gyro_y, imu_data.gyro_z,
-                        imu_data.temperature);
-        }
-      } else {
-        Serial.printf("Mode: %s | vx=%.2f vy=%.2f wz=%.2f | speed=%.2f\n",
-                      _closedLoopEnabled ? "CLOSED" : "OPEN",
-                      vx, vy, wz, speed_scale);
       }
+      
+      // Status information available for subscribers
+      
       _lastDebugPrint = currentTime;
     }
     vTaskDelayUntil(&last, period);

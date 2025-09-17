@@ -132,23 +132,7 @@ void IMUTask::taskLoop() {
                 _update_count++;
                 _last_update_ms = millis();
                 
-                // Publish IMU data to serial at publish frequency
-                if ((int32_t)(xTaskGetTickCount() - last_pub_time) >= 0) {
-                    last_pub_time += pub_period;
-                    // Serialize as JSON (ArduinoJson)
-                    StaticJsonDocument<256> msg;
-                    msg["type"]   = "imu";
-                    msg["t_ms"]   = imu_data.last_read;
-                    auto a = msg.createNestedArray("accel_g");
-                    a.add(imu_data.accel_x); a.add(imu_data.accel_y); a.add(imu_data.accel_z);
-                    auto g = msg.createNestedArray("gyro_dps");
-                    g.add(imu_data.gyro_x); g.add(imu_data.gyro_y); g.add(imu_data.gyro_z);
-                    auto m = msg.createNestedArray("mag_uT");
-                    m.add(imu_data.mag_x);  m.add(imu_data.mag_y);  m.add(imu_data.mag_z);
-                    msg["temp_c"] = imu_data.temperature;
-                    serializeJson(msg, Serial);
-                    Serial.println();
-                }
+                // Data is available in the internal queue for subscribers
             }
         }
         

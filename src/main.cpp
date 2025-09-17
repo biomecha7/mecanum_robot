@@ -5,6 +5,7 @@
 #include "PS2Controller.h"
 #include "IMUTask.h"
 #include "ControlTask.h"
+#include "CommsTask.h"
 #include <ArduinoJson.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,6 +15,13 @@ static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_GRN = GPIO_NUM_41; // On-board LED for ESP32
 static const gpio_num_t LED_PIN_YLW = GPIO_NUM_40; // On-board LED for ESP32
 
+// ---- Global Objects (needed for task lifetime) ----
+EncoderTask encoderTask;
+MotionController motionController(encoderTask);
+PS2Controller ps2Controller;
+IMUTask imuTask(IMU_SDA, IMU_SCL);
+ControlTask controlTask(motionController, ps2Controller, imuTask);
+CommsTask commsTask;
 
 // ---- Setup ----
 void setup() {
@@ -21,13 +29,6 @@ void setup() {
   delay(1000);
   Serial.println("\n========================================");
   Serial.println("🤖 Mecanum Robot Controller - ENHANCED");
-  
-  // Create objects locally
-  EncoderTask encoderTask;
-  MotionController motionController(encoderTask);
-  PS2Controller ps2Controller;
-  IMUTask imuTask(IMU_SDA, IMU_SCL);
-  ControlTask controlTask(motionController, ps2Controller, imuTask);
   
   Serial.println("Wheelbase: " + String(motionController.getWheelbaseInches()) + "\" square");
   Serial.println("Wheel Diameter: " + String(motionController.getWheelDiameterMm()) + "mm");
@@ -41,7 +42,19 @@ void setup() {
   Serial.println("  R2: Toggle Debug Mode");
   Serial.println("========================================");
 
-  // Initialize encoder task FIRST (MotionController depends on it)
+  // Initialize CommsTask FIRST (needed for other tasks)
+  Serial.println("Initializing CommsTask...");
+  if (!commsTask.initialize()) {
+    Serial.println("❌ CommsTask initialization failed");
+    return; // Cannot continue without communication
+  } else if (!commsTask.start()) {
+    Serial.println("❌ CommsTask start failed");
+    return; // Cannot continue without communication
+  } else {
+    Serial.println("✅ CommsTask started successfully");
+  }
+
+  // Initialize encoder task (MotionController depends on it)
   Serial.println("Initializing encoder task...");
   if (!encoderTask.initialize()) {
     Serial.println("❌ Encoder task initialization failed");
@@ -52,6 +65,9 @@ void setup() {
   } else {
     Serial.println("✅ Encoder task started successfully");
   }
+  
+  // Subscribe CommsTask to EncoderTask
+  commsTask.subscribeToEncoderTask(encoderTask);
 
   // Initialize motion controller (handles PWM setup internally)
   Serial.println("Initializing motion controller...");
@@ -69,6 +85,9 @@ void setup() {
   } else {
     Serial.println("✅ IMU task started successfully");
   }
+  
+  // Subscribe CommsTask to IMUTask
+  commsTask.subscribeToIMUTask(imuTask);
   
   // Initialize control task
   Serial.println("Initializing control task...");
