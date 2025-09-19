@@ -7,14 +7,10 @@
 #include "ControlTask.h"
 #include "CommsTask.h"
 #include "Supervisor.h"
+#include "RobotPins.h"
 #include <ArduinoJson.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-// FOR DEBUGGING and STATUS
-static const gpio_num_t LED_PIN_RED = GPIO_NUM_42; // On-board LED for ESP32
-static const gpio_num_t LED_PIN_GRN = GPIO_NUM_41; // On-board LED for ESP32
-static const gpio_num_t LED_PIN_YLW = GPIO_NUM_40; // On-board LED for ESP32
 
 // ---- Global Objects (needed for task lifetime) ----
 EncoderTask encoderTask;
@@ -125,10 +121,10 @@ void setup() {
   motionController.setControlMode(ControlMode::OPEN_LOOP);
   motionController.enablePIDControl(false);
   
-  Serial.println("Setup complete. Ready to drive!");
-  Serial.println("Press START to enable closed-loop control");
-  Serial.println("\n🔧 PS2 DEBUG MODE ENABLED");
-  Serial.println("Watch for PS2 status messages...");
+  Serial.println("✅ Setup complete. Robot ready for operation!");
+  Serial.println("🎮 Use joysticks to control movement");
+  Serial.println("🎯 Press START to enable closed-loop control");
+  Serial.println("🛑 Press SELECT for emergency stop");
 }
 
 void loop() {

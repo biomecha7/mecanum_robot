@@ -30,4 +30,9 @@
 #define IMU_SDA  38
 #define IMU_SCL  39
 
+// Status LED Pins
+#define LED_PIN_RED  GPIO_NUM_42  // Status LED - Error/ESTOP
+#define LED_PIN_GRN  GPIO_NUM_41  // Status LED - Normal operation  
+#define LED_PIN_YLW  GPIO_NUM_40  // Status LED - Warning/Attention
+
 // LEDC Channels (enum recommended in main)
