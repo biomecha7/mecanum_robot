@@ -3,6 +3,7 @@
 #include "PS2Controller.h"
 #include "IMUTask.h"
 #include "ISetpointProvider.h"
+#include "RobotPins.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -29,8 +30,8 @@ private:
   uint32_t _lastDebugPrint = 0;
   uint32_t _lastSensorUpdate = 0;
   
-  // LED pins for status indication
-  static const gpio_num_t LED_PIN_YLW = GPIO_NUM_40;
+  // LED pins for status indication (using definitions from RobotPins.h)
+  // LED_PIN_YLW is now available from RobotPins.h include
   
   // Control loop frequency
   static const int CONTROL_HZ = 100;
