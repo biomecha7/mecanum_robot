@@ -12,7 +12,6 @@ CommsTask::~CommsTask() {
 
 bool CommsTask::initialize(uint32_t baud) {
   Serial.begin(baud);
-  Serial.println("✅ CommsTask: Initialized successfully");
   return true;
 }
 
@@ -88,6 +87,7 @@ void CommsTask::taskLoop() {
   String rx_buffer = "";
   
   for (;;) {
+    
     // Handle incoming JSON commands from Pi
     while (Serial.available()) {
       char c = Serial.read();

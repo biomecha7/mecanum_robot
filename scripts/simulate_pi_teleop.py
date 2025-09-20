@@ -13,7 +13,7 @@ import math
 from typing import Dict, Any
 
 class PiTeleopSimulator:
-    def __init__(self, port: str = "/dev/cu.usbserial-0001", baudrate: int = 115200):
+    def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200):
         """Initialize the Pi teleop simulator."""
         self.port = port
         self.baudrate = baudrate
@@ -277,8 +277,8 @@ class PiTeleopSimulator:
 def main():
     """Main function with command line argument parsing."""
     parser = argparse.ArgumentParser(description="Simulate Pi teleop commands for robot testing")
-    parser.add_argument("--port", "-p", default="/dev/cu.usbserial-0001", 
-                      help="Serial port (default: /dev/cu.usbserial-0001)")
+    parser.add_argument("--port", "-p", default="/dev/ttyUSB0", 
+                      help="Serial port (default: /dev/ttyUSB0)")
     parser.add_argument("--baudrate", "-b", type=int, default=115200,
                       help="Baudrate (default: 115200)")
     parser.add_argument("--mode", "-m", choices=["basic", "advanced", "interactive"], 

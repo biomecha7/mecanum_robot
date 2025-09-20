@@ -10,11 +10,11 @@
  * Defines the possible states of the supervisor's state machine
  */
 enum class SupervisorState { 
-  IDLE,           // Robot is idle, no commands
-  MANUAL_PS2,     // Manual control via PS2 controller
-  TELEOP_PI,      // Teleop control via Pi commands
-  ESTOP           // Emergency stop (latched until cleared)
-  // Future states: AUTO_PI
+  IDLE,              // Robot is idle, no commands
+  PS2_OPEN_LOOP,      // PS2 control with open-loop motor control
+  PS2_CLOSED_LOOP,   // PS2 control with PID closed-loop control
+  PI_TELEOP,         // Pi/ROS2 teleop control
+  ESTOP              // Emergency stop (latched until cleared)
 };
 
 /**
@@ -110,6 +110,16 @@ private:
   
   // Command freshness timeout (ms)
   static const uint32_t PI_CMD_TIMEOUT_MS = 200;
+  
+  // Mode request tracking
+  enum class ModeRequest {
+    NONE,
+    PI_TELEOP,
+    PS2_OPEN_LOOP,
+    PS2_CLOSED_LOOP
+  };
+  volatile ModeRequest _mode_request{ModeRequest::NONE};
+  volatile uint32_t _mode_request_time_ms{0};
   
   // Task configuration
   static const int SUPERVISOR_HZ = 50;

@@ -20,7 +20,19 @@ bool PS2Controller::update() {
     uint32_t now = millis();
     
     // Try to read controller
-    if (m_psx.read(js) == PSXERROR_SUCCESS) {
+    int result = m_psx.read(js);
+    
+    // Debug PS2 read result every 2 seconds
+    static uint32_t last_debug = 0;
+    if (now - last_debug >= 2000) {
+        Serial.printf("🔧 PS2 Debug: Read_result=%d, Connected=%s, Estop=%s, Last_read=%ums ago\n",
+                      result, m_controller_connected ? "YES" : "NO", 
+                      m_emergency_stop ? "YES" : "NO",
+                      now - m_last_controller_read);
+        last_debug = now;
+    }
+    
+    if (result == PSXERROR_SUCCESS) {
         m_controller_connected = true;
         m_last_controller_read = now;
         

@@ -11,7 +11,7 @@ import sys
 
 def main():
     # Serial port configuration
-    port = "/dev/cu.usbserial-0001"  # Adjust if needed
+    port = "/dev/ttyUSB0"  # Linux ESP32 port (adjust if needed)
     baud = 115200
     
     try:
