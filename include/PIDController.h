@@ -3,9 +3,7 @@
 
 // PID Controller Modes
 enum class PIDMode {
-    VELOCITY,    // Control wheel velocity
-    ORIENTATION, // Control robot heading
-    POSITION     // Control robot position
+    VELOCITY    // Control wheel velocity only
 };
 
 // PID Configuration Structure
@@ -46,10 +44,8 @@ public:
     float getDerivative() const { return _derivative; }
     PIDMode getMode() const { return _mode; }
     
-    // Preset configurations for common use cases
+    // Preset configurations for wheel velocity control
     static PIDConfig getWheelVelocityConfig();
-    static PIDConfig getOrientationConfig();
-    static PIDConfig getPositionConfig();
 
 private:
     PIDMode _mode;

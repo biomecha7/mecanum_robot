@@ -22,8 +22,7 @@ static constexpr float MAX_WZ_RAD  = 2.50f;   // was 1.50
 MotionController::MotionController(EncoderTask& encoder_task) 
     : _encoder_task(encoder_task),
       m_frontLeft(nullptr), m_frontRight(nullptr), m_rearLeft(nullptr), m_rearRight(nullptr),
-      _control_mode(ControlMode::OPEN_LOOP), _pid_enabled(false),
-      m_targetHeading(0.0f) {
+      _control_mode(ControlMode::OPEN_LOOP), _pid_enabled(false) {
     
     // Initialize target velocities
     for (int i = 0; i < 4; i++) {
@@ -48,7 +47,6 @@ MotionController::~MotionController() {
     for (int i = 0; i < 4; i++) {
         if (m_velocityPID[i]) delete m_velocityPID[i];
     }
-    if (m_orientationPID) delete m_orientationPID;
 }
 
 void MotionController::initialize() {
@@ -58,14 +56,11 @@ void MotionController::initialize() {
     m_rearLeft = new MotorDriver(CH_M3_R, CH_M3_L, M3_RPWM, M3_LPWM, PWM_FREQ, PWM_RES);
     m_rearRight = new MotorDriver(CH_M4_R, CH_M4_L, M4_RPWM, M4_LPWM, PWM_FREQ, PWM_RES);
     
-    // Create PID controllers
+    // Create PID controllers for wheel velocity control
     PIDConfig velocityConfig = PIDController::getWheelVelocityConfig();
     for (int i = 0; i < 4; i++) {
         m_velocityPID[i] = new PIDController(PIDMode::VELOCITY, velocityConfig);
     }
-    
-    PIDConfig orientationConfig = PIDController::getOrientationConfig();
-    m_orientationPID = new PIDController(PIDMode::ORIENTATION, orientationConfig);
     
     // Initialize state
     _state.last_update_ms = millis();
@@ -103,31 +98,11 @@ void MotionController::drive(float forward, float strafe, float rotate) {
         
         if (_control_mode == ControlMode::VELOCITY_PID) {
             _applyVelocityControl();
-        } else if (_control_mode == ControlMode::ORIENTATION_PID) {
-            _applyOrientationControl();
         }
     }
 }
 
-void MotionController::driveWithHeading(float forward, float strafe, float target_heading) {
-    m_targetHeading = target_heading;
-
-    if (_control_mode == ControlMode::ORIENTATION_PID) {
-        // Compute heading error to [-pi, pi]
-        float heading_error = target_heading - _state.heading;
-        while (heading_error > PI)  heading_error -= 2*PI;
-        while (heading_error < -PI) heading_error += 2*PI;
-
-        // Let orientation PID produce a wz_correction
-        float wz_correction = m_orientationPID->compute(0.0f, heading_error, millis());
-
-        // Feed orientation as wz through kinematics so wheel signs are correct
-        _mecanumKinematics(forward, strafe, wz_correction, m_targetVelocities);
-        _applyVelocityControl();   // per-wheel velocity PIDs in m/s → duty
-    } else {
-        drive(forward, strafe, 0.0f);
-    }
-}
+// Removed driveWithHeading - orientation control handled by higher-level system
 
 void MotionController::stop() {
     for (int i = 0; i < 4; i++) {
@@ -143,9 +118,6 @@ void MotionController::stop() {
 void MotionController::updateSensors() {
     // Update wheel velocities from encoders
     _updateWheelVelocities();
-    
-    // Update robot pose
-    _updateRobotPose();
 }
 
 void MotionController::updateOdometry() {
@@ -169,18 +141,13 @@ void MotionController::setVelocityPIDGains(float kp, float ki, float kd) {
     }
 }
 
-void MotionController::setOrientationPIDGains(float kp, float ki, float kd) {
-    if (m_orientationPID) {
-        m_orientationPID->setGains(kp, ki, kd);
-    }
-}
+// Removed setOrientationPIDGains - orientation control handled by higher-level system
 
 void MotionController::resetPIDControllers() {
     for (int i = 0; i < 4; i++) {
         if (m_velocityPID[i]) m_velocityPID[i]->reset();
         m_wheelVelFilt[i] = 0.0f;
     }
-    if (m_orientationPID) m_orientationPID->reset();
 }
 
 void MotionController::_updateWheelVelocities() {
@@ -209,39 +176,7 @@ void MotionController::_updateWheelVelocities() {
     }
 }
 
-void MotionController::_updateRobotPose() {
-    uint32_t current_time = millis();
-    float dt = (current_time - _state.last_update_ms) / 1000.0f;
-    
-    if (dt > 0) {
-        // Get encoder data from EncoderTask (atomic read)
-        EncoderAtomicData encoder_data;
-        if (_encoder_task.getAtomicData(encoder_data)) {
-            // Update wheel positions from encoder data
-            for (int i = 0; i < 4; i++) {
-                _state.wheel_positions[i] = encoder_data.positions_rad[i];
-            }
-        }
-        
-        // Update position based on wheel velocities
-        float avg_vx = (_state.wheel_velocities[0] + _state.wheel_velocities[1] + 
-                       _state.wheel_velocities[2] + _state.wheel_velocities[3]) / 4.0f;
-        float avg_vy = (-_state.wheel_velocities[0] + _state.wheel_velocities[1] + 
-                       _state.wheel_velocities[2] - _state.wheel_velocities[3]) / 4.0f;
-        
-        // Rotate velocities to global frame
-        float cos_h = cos(_state.heading);
-        float sin_h = sin(_state.heading);
-        
-        _state.x += (avg_vx * cos_h - avg_vy * sin_h) * dt;
-        _state.y += (avg_vx * sin_h + avg_vy * cos_h) * dt;
-        
-        // Note: Heading update from IMU will be handled by dedicated IMU task
-        // For now, heading is not updated from IMU data
-        
-        _state.last_update_ms = current_time;
-    }
-}
+// Removed _updateRobotPose - position tracking handled by higher-level system
 
 void MotionController::_applyVelocityControl() {
     if (!_pid_enabled) return;
@@ -275,12 +210,7 @@ void MotionController::_applyVelocityControl() {
     }
 }
 
-void MotionController::_applyOrientationControl() {
-    if (!_pid_enabled) return;
-    
-    // This is handled in driveWithHeading method
-    _applyVelocityControl();
-}
+// Removed _applyOrientationControl - orientation control handled by higher-level system
 
 void MotionController::_clampWheelVelocities(float& fl, float& fr, float& rl, float& rr) {
     fl = std::max(-1.0f, std::min(1.0f, fl));
@@ -311,8 +241,6 @@ void MotionController::_mecanumInverseKinematics(float fl, float fr, float rl, f
 
 void MotionController::printDebugInfo() {
     Serial.println("=== Robot State ===");
-    Serial.printf("Position: (%.3f, %.3f) m\n", _state.x, _state.y);
-    Serial.printf("Heading: %.1f deg\n", _state.heading * RAD_TO_DEG);
     Serial.printf("Wheel Velocities: [%.3f, %.3f, %.3f, %.3f] m/s\n", 
                   _state.wheel_velocities[0], _state.wheel_velocities[1],
                   _state.wheel_velocities[2], _state.wheel_velocities[3]);
@@ -332,11 +260,6 @@ void MotionController::printPIDStatus() {
                          i, m_velocityPID[i]->getLastError(), 
                          m_velocityPID[i]->getIntegral(), m_velocityPID[i]->getDerivative());
         }
-    }
-    if (m_orientationPID) {
-        Serial.printf("Orientation PID: Error=%.3f, Integral=%.3f, Derivative=%.3f\n",
-                     m_orientationPID->getLastError(), m_orientationPID->getIntegral(), 
-                     m_orientationPID->getDerivative());
     }
 }
 

@@ -24,22 +24,12 @@
 // ---- Control Modes ----
 enum class ControlMode {
     OPEN_LOOP,      // Direct motor control (original behavior)
-    VELOCITY_PID,   // Closed-loop velocity control
-    ORIENTATION_PID, // Closed-loop orientation control
-    POSITION_PID    // Closed-loop position control
+    VELOCITY_PID    // Closed-loop velocity control for individual motors
 };
 
 // ---- Robot State Structure ----
 struct RobotState {
-    // Position and orientation
-    float x, y;           // Position in meters
-    float heading;        // Heading in radians
-    
-    // Velocities
-    float vx, vy, vz;     // Linear velocities in m/s
-    float wx, wy, wz;     // Angular velocities in rad/s
-    
-    // Wheel states
+    // Wheel states (position tracking handled by higher-level control)
     float wheel_positions[4];  // Wheel positions in meters
     float wheel_velocities[4]; // Wheel velocities in m/s
     
@@ -66,7 +56,6 @@ public:
     
     // Main control methods
     void drive(float forward, float strafe, float rotate);
-    void driveWithHeading(float forward, float strafe, float target_heading);
     void stop();
     
     // Sensor integration
@@ -76,7 +65,6 @@ public:
     // PID control methods
     void enablePIDControl(bool enable);
     void setVelocityPIDGains(float kp, float ki, float kd);
-    void setOrientationPIDGains(float kp, float ki, float kd);
     void resetPIDControllers();
     
     // State access
@@ -107,9 +95,8 @@ private:
     // Filtered wheel velocity (EMA) used by the velocity PID
     float m_wheelVelFilt[4];
     
-    // PID controllers
-    PIDController* m_velocityPID[4];  // One for each wheel
-    PIDController* m_orientationPID;
+    // PID controllers (one for each wheel)
+    PIDController* m_velocityPID[4];
     
     // Control state
     ControlMode _control_mode;
@@ -120,7 +107,6 @@ private:
     
     // Target values for closed-loop control
     float m_targetVelocities[4];  // Target wheel velocities
-    float m_targetHeading;        // Target heading for orientation control
     
     // PWM configuration
     static const int PWM_FREQ = 16000;
@@ -136,9 +122,7 @@ private:
     
     // Private methods
     void _updateWheelVelocities();
-    void _updateRobotPose();
     void _applyVelocityControl();
-    void _applyOrientationControl();
     void _clampWheelVelocities(float& fl, float& fr, float& rl, float& rr);
     void _mecanumKinematics(float vx, float vy, float wz, float* wheel_vels);
     void _mecanumInverseKinematics(float fl, float fr, float rl, float rr, float* vx, float* vy, float* wz);

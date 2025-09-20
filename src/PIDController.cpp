@@ -10,23 +10,7 @@ const float WHEEL_VELOCITY_INTEGRAL_LIMIT = 2.0f;
 const uint32_t WHEEL_VELOCITY_SAMPLE_TIME_MS = 20;  // from 10 → 20 ms
 const float WHEEL_VELOCITY_DEADBAND = 0.02f;        // ignore tiny errors in m/s
 
-const float ORIENTATION_KP = 1.5f;
-const float ORIENTATION_KI = 0.2f;
-const float ORIENTATION_KD = 0.3f;
-const float ORIENTATION_MAX_OUTPUT = 0.8f;
-const float ORIENTATION_MIN_OUTPUT = -0.8f;
-const float ORIENTATION_INTEGRAL_LIMIT = 1.0f;
-const float ORIENTATION_DEADBAND = 0.02f;
-const uint32_t ORIENTATION_SAMPLE_TIME_MS = 20;
-
-const float POSITION_KP = 1.0f;
-const float POSITION_KI = 0.1f;
-const float POSITION_KD = 0.2f;
-const float POSITION_MAX_OUTPUT = 0.6f;
-const float POSITION_MIN_OUTPUT = -0.6f;
-const float POSITION_INTEGRAL_LIMIT = 0.5f;
-const float POSITION_DEADBAND = 0.05f;
-const uint32_t POSITION_SAMPLE_TIME_MS = 50;
+// Removed orientation and position PID constants - handled by higher-level control
 
 PIDController::PIDController(PIDMode mode, const PIDConfig& config)
     : _mode(mode), _config(config), _enabled(true), _last_error(0.0f), 
@@ -147,7 +131,7 @@ void PIDController::_applyOutputLimits(float& output) {
     }
 }
 
-// Static factory methods for preset configurations
+// Static factory method for wheel velocity configuration
 PIDConfig PIDController::getWheelVelocityConfig() {
     PIDConfig config;
     config.kp = WHEEL_VELOCITY_KP;
@@ -158,31 +142,5 @@ PIDConfig PIDController::getWheelVelocityConfig() {
     config.integral_limit = WHEEL_VELOCITY_INTEGRAL_LIMIT;
     config.deadband = WHEEL_VELOCITY_DEADBAND;
     config.sample_time_ms = WHEEL_VELOCITY_SAMPLE_TIME_MS;
-    return config;
-}
-
-PIDConfig PIDController::getOrientationConfig() {
-    PIDConfig config;
-    config.kp = ORIENTATION_KP;
-    config.ki = ORIENTATION_KI;
-    config.kd = ORIENTATION_KD;
-    config.max_output = ORIENTATION_MAX_OUTPUT;
-    config.min_output = ORIENTATION_MIN_OUTPUT;
-    config.integral_limit = ORIENTATION_INTEGRAL_LIMIT;
-    config.deadband = ORIENTATION_DEADBAND;
-    config.sample_time_ms = ORIENTATION_SAMPLE_TIME_MS;
-    return config;
-}
-
-PIDConfig PIDController::getPositionConfig() {
-    PIDConfig config;
-    config.kp = POSITION_KP;
-    config.ki = POSITION_KI;
-    config.kd = POSITION_KD;
-    config.max_output = POSITION_MAX_OUTPUT;
-    config.min_output = POSITION_MIN_OUTPUT;
-    config.integral_limit = POSITION_INTEGRAL_LIMIT;
-    config.deadband = POSITION_DEADBAND;
-    config.sample_time_ms = POSITION_SAMPLE_TIME_MS;
     return config;
 }
