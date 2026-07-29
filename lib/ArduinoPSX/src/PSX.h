@@ -57,81 +57,38 @@
 #define PSXERROR_NODATA     1
 
 
-// See PSX.cpp for implementation
-
-/**
- * @brief Provides routines to interface a Playstation 2 (PSX) controller
- * 
- */
 class PSX
 {
     public:
 
-        /**
-         * @brief Holds the state of the controller
-         * 
-         */
         struct PSXDATA
         {
-            unsigned int buttons;   //!< The state of all buttons encoded as a bitfield
-            byte JoyLeftX;          //!< The horizontal value of the left joystick
-            byte JoyLeftY;          //!< The vertical value of the left joystick
-            byte JoyRightX;         //!< The horizontal value of the right joystick
-            byte JoyRightY;         //!< The vertical value of the right joystick
+            unsigned int buttons;
+            byte JoyLeftX;
+            byte JoyLeftY;
+            byte JoyRightX;
+            byte JoyRightY;
         };
 
-        /**
-         * @brief Construct a new PSX::PSX object
-         * 
-         */
         PSX();
 
-        /**
-         * @brief Assign the pins to be used for communication and set the protocol timing
-         * 
-         * @param dataPin The data pin (usually brown wire)
-         * @param cmdPin The command pin (usually orange wire)
-         * @param attPin The attention pin (usually yellow wire)
-         * @param clockPin The clock pin (usually blue wire)
-         * @param delay The protocol timing delay in microseconds (usually 10)
-         */
         void setupPins(byte dataPin, byte cmdPin, byte attPin, byte clockPin, byte delay);
-
-        /**
-         * @brief Read the state of all joysticks and buttons from the controller
-         * 
-         * @param psxdata The state read from the controller
-         * @return int Error code, PSXERROR_SUCCESS or PSXERROR_NODATA
-         */
         int read(PSXDATA &psxdata);
-
-        /**
-         * @brief Configures the controller, disables vibration and sets either analog or digital mode
-         * 
-         * @param mode What mode to set. PSXMODE_ANALOG or PSXMODE_DIGITAL.
-         */
         void config(byte mode);
-        
-        /*
-        * A block of GPIO function can be overwritten to adopt joystick to some kind of expanders
-        */
-       
+
+        /** Small motor: 0=off, 0xFF=on. Large motor: 0=off, 0x40-0xFF=intensity. */
+        void setRumble(byte smallMotor, byte largeMotor);
+
         virtual void pinMode(byte pin, byte mode) { ::pinMode(pin, mode); };
         virtual void digitalWrite(byte pin, byte value){ ::digitalWrite(pin, value); };
         virtual byte digitalRead(byte pin){ return ::digitalRead(pin);};
         
     private:
-    
-        /**
-         * @brief Send a command to the PSX controller
-         * 
-         * @param command The command to send
-         * @param response The response from the controller
-         */
         void sendCommand(byte command, byte &response);
 
         byte _dataPin, _cmdPin, _attPin, _clockPin, _delay;
-
+        byte _rumbleSmall = 0;
+        byte _rumbleLarge = 0;
 };
 
 #endif
