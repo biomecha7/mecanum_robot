@@ -22,6 +22,11 @@ Open-loop mecanum drive from a PS2 controller on a Heltec WiFi LoRa 32 V3 / V3.1
 | START | Arm / disarm |
 | START + TRIANGLE | Emergency stop |
 | SELECT + START (1 s) | Clear ESTOP |
+| SQUARE | Toggle left eye LED (GPIO 47) |
+| CIRCLE | Toggle right eye LED (GPIO 48) |
+| X (Cross) | Single wink |
+| TRIANGLE | ~45s wink / blink eye show |
+| R2 | Fun buzzer sound (GPIO 38/40) |
 
 ## Hardware pins
 
@@ -32,6 +37,8 @@ See [`include/RobotPins.h`](include/RobotPins.h).
 | PS2 DAT/CMD/ATT/CLK | 4 / 6 / 5 / 7 |
 | M1–M4 RPWM/LPWM | 46/1, 2/3, **0**/37, 45/19 |
 | Armed LED | 41 |
+| Left / right eye LEDs | 47 / 48 |
+| Buzzer (RedBot) | 38 / 40 |
 | OLED Vext / RST / SDA / SCL | **36** / 21 / 17 / 18 |
 
 **Note:** GPIO 36 is Heltec OLED power control. M3 forward is on GPIO 0.

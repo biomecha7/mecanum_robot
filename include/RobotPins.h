@@ -17,6 +17,12 @@
 #define M4_LPWM 19
 
 #define LED_ARMED  GPIO_NUM_41
+#define LED_LEFT   47   // Square toggles
+#define LED_RIGHT  48   // Circle toggles
+
+// SparkFun RedBot buzzer (differential square-wave on both pins)
+#define BUZZER_A   38
+#define BUZZER_B   40
 
 // Heltec WiFi LoRa 32 V3.1 OLED
 #define OLED_VEXT  36

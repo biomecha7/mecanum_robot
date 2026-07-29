@@ -17,10 +17,117 @@ static float vx = 0, vy = 0, wz = 0;
 static float speedScale = 0.70f;
 static bool estop = false;
 static bool armed = false;
+static bool leftEyeOn = false;
+static bool rightEyeOn = false;
 static uint32_t estopClearStart = 0;
 static uint32_t lastPs2Ok = 0;
 
+// Non-blocking eye animations
+enum class EyeMode { Idle, WinkOnce, Show };
+static EyeMode eyeMode = EyeMode::Idle;
+static uint32_t eyeStepAt = 0;
+static int eyeStep = 0;
+static bool eyeWinkLeft = false;  // single-wink: which eye closes
+
+struct EyeCue {
+  uint16_t ms;
+  bool left;
+  bool right;
+};
+
 static const float DEADBAND = 0.10f;
+
+static TaskHandle_t buzzerTaskHandle = nullptr;
+static volatile bool buzzerBusy = false;
+
+// Kid-friendly note frequencies (Hz). 0 = rest.
+enum {
+  NOTE_REST = 0,
+  NOTE_C4 = 262, NOTE_D4 = 294, NOTE_E4 = 330, NOTE_F4 = 349,
+  NOTE_G4 = 392, NOTE_A4 = 440, NOTE_B4 = 494,
+  NOTE_C5 = 523, NOTE_D5 = 587, NOTE_E5 = 659, NOTE_F5 = 698,
+  NOTE_G5 = 784, NOTE_A5 = 880, NOTE_B5 = 988,
+  NOTE_C6 = 1047, NOTE_D6 = 1175, NOTE_E6 = 1319, NOTE_G6 = 1568,
+};
+
+struct BuzzNote { uint16_t hz; uint16_t ms; };
+
+static void buzzerIdlePins() {
+  digitalWrite(BUZZER_A, LOW);
+  digitalWrite(BUZZER_B, LOW);
+}
+
+static void playToneHz(int hz, int ms) {
+  if (ms <= 0) return;
+  if (hz <= 0) {
+    buzzerIdlePins();
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    return;
+  }
+
+  // Differential square wave on A/B — louder on a piezo than single-ended
+  const uint32_t halfUs = 1000000UL / (uint32_t)(2 * hz);
+  const uint32_t endMs = millis() + (uint32_t)ms;
+  bool high = false;
+  while ((int32_t)(millis() - endMs) < 0) {
+    high = !high;
+    digitalWrite(BUZZER_A, high ? HIGH : LOW);
+    digitalWrite(BUZZER_B, high ? LOW : HIGH);
+    delayMicroseconds(halfUs);
+  }
+  buzzerIdlePins();
+}
+
+static void playTune(const BuzzNote* notes, int count) {
+  for (int i = 0; i < count; i++) {
+    playToneHz(notes[i].hz, notes[i].ms);
+    // tiny gap so notes don't smear together
+    if (notes[i].hz > 0) {
+      buzzerIdlePins();
+      delayMicroseconds(8000);
+    }
+  }
+  buzzerIdlePins();
+}
+
+// Cartoon power-up → laser zap → happy arpeggio (~1.2s)
+static void playFunKidSound() {
+  static const BuzzNote tune[] = {
+    // Rising "charge"
+    {NOTE_C5, 70}, {NOTE_E5, 70}, {NOTE_G5, 70}, {NOTE_C6, 90},
+    // Boing
+    {NOTE_G6, 50}, {NOTE_E6, 50}, {NOTE_C6, 60}, {NOTE_REST, 40},
+    // Laser down-sweep (stepped)
+    {1200, 35}, {1000, 35}, {800, 35}, {600, 35}, {400, 45},
+    {NOTE_REST, 50},
+    // Happy blips
+    {NOTE_E5, 80}, {NOTE_G5, 80}, {NOTE_E6, 120},
+    {NOTE_REST, 30},
+    {NOTE_C6, 60}, {NOTE_G5, 60}, {NOTE_C6, 140},
+  };
+  playTune(tune, (int)(sizeof(tune) / sizeof(tune[0])));
+}
+
+static void buzzerTask(void*) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    buzzerBusy = true;
+    playFunKidSound();
+    buzzerBusy = false;
+  }
+}
+
+static void triggerBuzzer() {
+  if (buzzerTaskHandle == nullptr) return;
+  xTaskNotifyGive(buzzerTaskHandle);
+}
+
+static void initBuzzer() {
+  pinMode(BUZZER_A, OUTPUT);
+  pinMode(BUZZER_B, OUTPUT);
+  buzzerIdlePins();
+  xTaskCreatePinnedToCore(buzzerTask, "Buzzer", 3072, nullptr, 2, &buzzerTaskHandle, 0);
+}
 
 static bool pressed(uint16_t b) {
   return (buttons & b) && !(prevButtons & b);
@@ -63,6 +170,168 @@ static void stopAll() {
 
 static void setArmedLed(bool on) {
   digitalWrite(LED_ARMED, on ? HIGH : LOW);
+}
+
+static void setLeftEye(bool on) {
+  leftEyeOn = on;
+  digitalWrite(LED_LEFT, on ? HIGH : LOW);
+}
+
+static void setRightEye(bool on) {
+  rightEyeOn = on;
+  digitalWrite(LED_RIGHT, on ? HIGH : LOW);
+}
+
+static void eyesBoth(bool on) {
+  setLeftEye(on);
+  setRightEye(on);
+}
+
+static void startWinkOnce() {
+  eyeMode = EyeMode::WinkOnce;
+  eyeStep = 0;
+  eyeStepAt = millis();
+  eyeWinkLeft = (millis() & 1);  // alternate which eye
+  eyesBoth(true);
+  Serial.println(eyeWinkLeft ? "Wink (left)" : "Wink (right)");
+}
+
+// ~45s playful wink / blink / stare routine
+static const EyeCue EYE_SHOW[] = {
+  // Wake / settle
+  {800,  true,  true},
+  {120,  false, false},
+  {400,  true,  true},
+  // Slow double-blink
+  {90,   false, false},
+  {220,  true,  true},
+  {90,   false, false},
+  {600,  true,  true},
+  // Coy left wink
+  {180,  false, true},
+  {500,  true,  true},
+  {180,  false, true},
+  {900,  true,  true},
+  // Coy right wink
+  {180,  true,  false},
+  {450,  true,  true},
+  {200,  true,  false},
+  {800,  true,  true},
+  // Alternating chatter
+  {140,  false, true},
+  {140,  true,  false},
+  {140,  false, true},
+  {140,  true,  false},
+  {140,  false, true},
+  {140,  true,  false},
+  {700,  true,  true},
+  // Long sleepy blink
+  {700,  false, false},
+  {1100, true,  true},
+  // Peek left
+  {900,  true,  false},
+  {400,  true,  true},
+  // Peek right
+  {900,  false, true},
+  {500,  true,  true},
+  // Rapid flutter
+  {60,   false, false},
+  {80,   true,  true},
+  {60,   false, false},
+  {80,   true,  true},
+  {60,   false, false},
+  {80,   true,  true},
+  {60,   false, false},
+  {500,  true,  true},
+  // Dramatic one-eye hold
+  {3500, false, true},
+  {800,  true,  true},
+  {3500, true,  false},
+  {1000, true,  true},
+  // Sync heartbeat blinks
+  {100,  false, false},
+  {280,  true,  true},
+  {100,  false, false},
+  {1200, true,  true},
+  {100,  false, false},
+  {280,  true,  true},
+  {100,  false, false},
+  {1500, true,  true},
+  // Mischief: wink-wink
+  {160,  false, true},
+  {220,  true,  true},
+  {160,  true,  false},
+  {220,  true,  true},
+  {160,  false, true},
+  {220,  true,  true},
+  {160,  true,  false},
+  {1400, true,  true},
+  // Slow cross-fade stares
+  {1000, true,  false},
+  {1000, false, true},
+  {1000, true,  false},
+  {1000, false, true},
+  {1200, true,  true},
+  // Final big wink + settle awake
+  {120,  false, false},
+  {350,  true,  true},
+  {500,  false, true},
+  {2800, true,  true},
+  {150,  false, false},
+  {1200, true,  true},
+};
+
+static const int EYE_SHOW_LEN = sizeof(EYE_SHOW) / sizeof(EYE_SHOW[0]);
+
+static void startEyeShow() {
+  eyeMode = EyeMode::Show;
+  eyeStep = 0;
+  eyeStepAt = millis();
+  setLeftEye(EYE_SHOW[0].left);
+  setRightEye(EYE_SHOW[0].right);
+  Serial.println("Eye show (~45s) — press X to cut to a wink");
+}
+
+static void serviceEyes() {
+  if (eyeMode == EyeMode::Idle) return;
+
+  uint32_t now = millis();
+
+  if (eyeMode == EyeMode::WinkOnce) {
+    // both on → close one → open
+    static const uint16_t phases[] = {40, 220, 180};
+    if (now - eyeStepAt < phases[eyeStep]) return;
+    eyeStepAt = now;
+    eyeStep++;
+    if (eyeStep == 1) {
+      if (eyeWinkLeft) setLeftEye(false);
+      else             setRightEye(false);
+    } else if (eyeStep == 2) {
+      eyesBoth(true);
+    } else {
+      eyeMode = EyeMode::Idle;
+    }
+    return;
+  }
+
+  // Long show
+  if (eyeStep >= EYE_SHOW_LEN) {
+    eyesBoth(true);
+    eyeMode = EyeMode::Idle;
+    Serial.println("Eye show done");
+    return;
+  }
+  if (now - eyeStepAt < EYE_SHOW[eyeStep].ms) return;
+  eyeStepAt = now;
+  eyeStep++;
+  if (eyeStep >= EYE_SHOW_LEN) {
+    eyesBoth(true);
+    eyeMode = EyeMode::Idle;
+    Serial.println("Eye show done");
+    return;
+  }
+  setLeftEye(EYE_SHOW[eyeStep].left);
+  setRightEye(EYE_SHOW[eyeStep].right);
 }
 
 static void setRumble(bool on) {
@@ -161,9 +430,17 @@ void setup() {
   Serial.println("Mecanum open-loop");
   Serial.println("  START = arm/disarm");
   Serial.println("  START+TRIANGLE = ESTOP");
+  Serial.println("  SQUARE/CIRCLE = toggle eyes");
+  Serial.println("  X = wink once   TRIANGLE = eye show (~45s)");
+  Serial.println("  R2 = fun buzzer");
 
   pinMode(LED_ARMED, OUTPUT);
+  pinMode(LED_LEFT, OUTPUT);
+  pinMode(LED_RIGHT, OUTPUT);
   setArmedLed(false);
+  setLeftEye(false);
+  setRightEye(false);
+  initBuzzer();
 
   initOledOnce();
 
@@ -200,6 +477,26 @@ void loop() {
     if (!armed) stopAll();
     Serial.println(armed ? "ARMED" : "DISARMED");
   }
+
+  if (pressed(PSXBTN_SQUARE)) {
+    setLeftEye(!leftEyeOn);
+  }
+  if (pressed(PSXBTN_CIRCLE)) {
+    setRightEye(!rightEyeOn);
+  }
+
+  // X = single wink; Triangle alone = long show (START+TRIANGLE is ESTOP)
+  if (pressed(PSXBTN_CROSS)) {
+    startWinkOnce();
+  }
+  if (pressed(PSXBTN_TRIANGLE) && !held(PSXBTN_START)) {
+    startEyeShow();
+  }
+  if (pressed(PSXBTN_R2)) {
+    triggerBuzzer();
+  }
+
+  serviceEyes();
 
   const bool motorInput = fabsf(vx) > 0.02f || fabsf(vy) > 0.02f || fabsf(wz) > 0.02f;
 
