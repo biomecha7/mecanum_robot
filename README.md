@@ -10,6 +10,7 @@ Open-loop mecanum drive from a PS2 controller on a Heltec WiFi LoRa 32 V3 / V3.1
 - Controller rumble if you try to drive while disarmed
 - Onboard OLED shows `Hello Adei` once at boot (GPIO 36 is Vext — leave it free)
 - ESTOP: **START + TRIANGLE**; clear with **SELECT + START** (hold 1 s)
+- Freenove / WS2812 **7 RGB LED** circle on GPIO 33 — **SELECT** enters LED playground mode
 
 ## Controls
 
@@ -22,11 +23,25 @@ Open-loop mecanum drive from a PS2 controller on a Heltec WiFi LoRa 32 V3 / V3.1
 | START | Arm / disarm |
 | START + TRIANGLE | Emergency stop |
 | SELECT + START (1 s) | Clear ESTOP |
+| SELECT | Toggle RGB LED mode (motors stop; sticks drive lights) |
 | SQUARE | Toggle left eye LED (GPIO 47) |
 | CIRCLE | Toggle right eye LED (GPIO 48) |
 | X (Cross) | Single wink |
 | TRIANGLE | ~45s wink / blink eye show |
 | R2 | Fun buzzer sound (GPIO 38/40) |
+
+### RGB LED mode (SELECT)
+
+Motors are forced off. Cycle effects with **SQUARE** / **CIRCLE** (prev / next). **X** jumps to Comet; **TRIANGLE** jumps to RainbowSpin.
+
+| Effect | Left stick | Right stick |
+|--------|------------|-------------|
+| **Paint** | X = hue, Y = brightness | X = saturation, Y = center accent |
+| **RainbowSpin** | X = spin speed/dir, Y = brightness | Y = color spread |
+| **Comet** | Aim the comet (vector); mag = brightness | X = hue / auto-spin, Y = trail length |
+| **Pulse** | X = breath rate, Y = brightness | X = hue, Y = saturation |
+| **Sparkle** | X = density, Y = brightness | X = hue, Y = saturation |
+| **Fire** | X = sparking, Y = intensity | X = warm↔cool flame, Y = brightness |
 
 ## Hardware pins
 
@@ -39,9 +54,22 @@ See [`include/RobotPins.h`](include/RobotPins.h).
 | Armed LED | 41 |
 | Left / right eye LEDs | 47 / 48 |
 | Buzzer (RedBot) | 38 / 40 |
+| RGB LED data (7× WS2812) | **33** |
 | OLED Vext / RST / SDA / SCL | **36** / 21 / 17 / 18 |
 
 **Note:** GPIO 36 is Heltec OLED power control. M3 forward is on GPIO 0.
+
+### RGB LED wiring
+
+The Freenove / WS2812 7-LED circle uses a **single data line** (not PWM). Wire:
+
+| Module | Heltec |
+|--------|--------|
+| **S** (DIN / data) | GPIO **33** |
+| **V** | **5V** (module is ~3.5–5.5 V; prefer 5 V) |
+| **G** | **GND** (common with the board) |
+
+GPIO 33–35 were free in firmware; **36** is OLED Vext. **33** is the pick (avoids the onboard LED on 35).
 
 ## Build & flash
 
@@ -57,10 +85,12 @@ Port is auto-detected. In Cursor/VS Code, **Ctrl+Shift+R** runs Build + Flash + 
 ## Layout
 
 ```
-src/main.cpp          # PS2, arming, mecanum mix, OLED
+src/main.cpp          # PS2, arming, mecanum mix, OLED, LED mode
 src/MotorDriver.cpp   # BTS7960 PWM
+src/RgbLedDriver.cpp  # 7× WS2812 effects
 include/RobotPins.h   # Pin map
 include/MotorDriver.h
+include/RgbLedDriver.h
 lib/ArduinoPSX/       # PS2 library (with rumble)
 platformio.ini
 ```

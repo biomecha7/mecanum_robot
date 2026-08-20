@@ -5,18 +5,22 @@
 #include <PSX.h>
 #include "RobotPins.h"
 #include "MotorDriver.h"
+#include "RgbLedDriver.h"
 
 static MotorDriver* m1 = nullptr;
 static MotorDriver* m2 = nullptr;
 static MotorDriver* m3 = nullptr;
 static MotorDriver* m4 = nullptr;
+static RgbLedDriver rgbLed;
 
 PSX psx;
 static uint16_t buttons = 0, prevButtons = 0;
 static float vx = 0, vy = 0, wz = 0;
+static float stickLX = 0, stickLY = 0, stickRX = 0, stickRY = 0;
 static float speedScale = 0.70f;
 static bool estop = false;
 static bool armed = false;
+static bool ledMode = false;  // SELECT toggles: joystick drives the RGB circle
 static bool leftEyeOn = false;
 static bool rightEyeOn = false;
 static uint32_t estopClearStart = 0;
@@ -389,9 +393,15 @@ static bool readPs2() {
     else                       speedScale = 0.70f;
   }
 
-  vx = mapStick(js.JoyLeftY, true);
-  vy = mapStick(js.JoyRightX, false);
-  wz = mapStick(js.JoyLeftX, false);
+  // Full sticks for RGB mode (Y inverted so up = positive)
+  stickLX = mapStick(js.JoyLeftX, false);
+  stickLY = mapStick(js.JoyLeftY, true);
+  stickRX = mapStick(js.JoyRightX, false);
+  stickRY = mapStick(js.JoyRightY, true);
+
+  vx = stickLY;
+  vy = stickRX;
+  wz = stickLX;
   if (held(PSXBTN_UP))    vx = 1.0f;
   if (held(PSXBTN_DOWN))  vx = -1.0f;
   if (held(PSXBTN_LEFT))  wz = -1.0f;
@@ -430,7 +440,8 @@ void setup() {
   Serial.println("Mecanum open-loop");
   Serial.println("  START = arm/disarm");
   Serial.println("  START+TRIANGLE = ESTOP");
-  Serial.println("  SQUARE/CIRCLE = toggle eyes");
+  Serial.println("  SELECT = RGB LED mode (joystick fun)");
+  Serial.println("  SQUARE/CIRCLE = toggle eyes (or RGB effects in LED mode)");
   Serial.println("  X = wink once   TRIANGLE = eye show (~45s)");
   Serial.println("  R2 = fun buzzer");
 
@@ -450,6 +461,12 @@ void setup() {
   m4 = new MotorDriver(6, 7, M4_RPWM, M4_LPWM);
   holdOledPower();  // re-lock after LEDC attach
 
+  if (!rgbLed.begin()) {
+    Serial.println("RGB LED init failed (check GPIO 33 wiring)");
+  } else {
+    Serial.println("RGB LED ready on GPIO 33 (7x WS2812)");
+  }
+
   psx.setupPins(PIN_PS2_DAT, PIN_PS2_CMD, PIN_PS2_ATT, PIN_PS2_CLK, 10);
   psx.config(PSXMODE_ANALOG);
   psx.setRumble(0, 0);
@@ -465,6 +482,10 @@ void loop() {
   if (estop || !ok) {
     stopAll();
     setRumble(false);
+    if (ledMode) {
+      ledMode = false;
+      rgbLed.setEnabled(false);
+    }
     holdOledPower();
     delay(20);
     return;
@@ -478,34 +499,78 @@ void loop() {
     Serial.println(armed ? "ARMED" : "DISARMED");
   }
 
-  if (pressed(PSXBTN_SQUARE)) {
-    setLeftEye(!leftEyeOn);
-  }
-  if (pressed(PSXBTN_CIRCLE)) {
-    setRightEye(!rightEyeOn);
-  }
-
-  // X = single wink; Triangle alone = long show (START+TRIANGLE is ESTOP)
-  if (pressed(PSXBTN_CROSS)) {
-    startWinkOnce();
-  }
-  if (pressed(PSXBTN_TRIANGLE) && !held(PSXBTN_START)) {
-    startEyeShow();
-  }
-  if (pressed(PSXBTN_R2)) {
-    triggerBuzzer();
-  }
-
-  serviceEyes();
-
-  const bool motorInput = fabsf(vx) > 0.02f || fabsf(vy) > 0.02f || fabsf(wz) > 0.02f;
-
-  if (!armed) {
+  // SELECT alone toggles RGB playground (SELECT+START is ESTOP clear)
+  if (pressed(PSXBTN_SELECT) && !held(PSXBTN_START)) {
+    ledMode = !ledMode;
+    rgbLed.setEnabled(ledMode);
     stopAll();
-    setRumble(motorInput);
-  } else {
     setRumble(false);
-    driveMecanum(vx * speedScale, vy * speedScale, wz * speedScale);
+    if (ledMode) {
+      Serial.print("LED mode ON — effect: ");
+      Serial.println(rgbLed.effectName());
+      Serial.println("  SQUARE/CIRCLE = prev/next effect");
+      Serial.println("  sticks drive the active effect");
+    } else {
+      Serial.println("LED mode OFF — drive restored");
+    }
+  }
+
+  if (ledMode) {
+    if (pressed(PSXBTN_SQUARE)) {
+      rgbLed.prevEffect();
+      Serial.print("RGB effect: ");
+      Serial.println(rgbLed.effectName());
+    }
+    if (pressed(PSXBTN_CIRCLE)) {
+      rgbLed.nextEffect();
+      Serial.print("RGB effect: ");
+      Serial.println(rgbLed.effectName());
+    }
+    if (pressed(PSXBTN_CROSS)) {
+      rgbLed.setEffect(RgbEffect::Comet);
+      Serial.println("RGB effect: Comet");
+    }
+    if (pressed(PSXBTN_TRIANGLE) && !held(PSXBTN_START)) {
+      rgbLed.setEffect(RgbEffect::RainbowSpin);
+      Serial.println("RGB effect: RainbowSpin");
+    }
+    if (pressed(PSXBTN_R2)) {
+      triggerBuzzer();
+    }
+
+    stopAll();
+    setRumble(false);
+    rgbLed.update(stickLX, stickLY, stickRX, stickRY);
+  } else {
+    if (pressed(PSXBTN_SQUARE)) {
+      setLeftEye(!leftEyeOn);
+    }
+    if (pressed(PSXBTN_CIRCLE)) {
+      setRightEye(!rightEyeOn);
+    }
+
+    // X = single wink; Triangle alone = long show (START+TRIANGLE is ESTOP)
+    if (pressed(PSXBTN_CROSS)) {
+      startWinkOnce();
+    }
+    if (pressed(PSXBTN_TRIANGLE) && !held(PSXBTN_START)) {
+      startEyeShow();
+    }
+    if (pressed(PSXBTN_R2)) {
+      triggerBuzzer();
+    }
+
+    serviceEyes();
+
+    const bool motorInput = fabsf(vx) > 0.02f || fabsf(vy) > 0.02f || fabsf(wz) > 0.02f;
+
+    if (!armed) {
+      stopAll();
+      setRumble(motorInput);
+    } else {
+      setRumble(false);
+      driveMecanum(vx * speedScale, vy * speedScale, wz * speedScale);
+    }
   }
 
   holdOledPower();
